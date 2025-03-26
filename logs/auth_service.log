@@ -1,0 +1,97 @@
+2025-03-26 19:20:03,741 INFO autoreload Watching for file changes with StatReloader
+2025-03-26 19:22:02,767 INFO autoreload Watching for file changes with StatReloader
+2025-03-26 19:22:05,658 WARNING log Not Found: /
+2025-03-26 19:22:05,658 WARNING basehttp "GET / HTTP/1.1" 404 2541
+2025-03-26 19:22:05,692 WARNING log Not Found: /favicon.ico
+2025-03-26 19:22:05,693 INFO basehttp - Broken pipe from ('127.0.0.1', 63525)
+2025-03-26 19:22:14,599 INFO basehttp "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 19:22:14,637 INFO basehttp "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-bundle.js HTTP/1.1" 304 0
+2025-03-26 19:22:14,640 INFO basehttp "GET /static/drf-yasg/swagger-ui-init.js HTTP/1.1" 304 0
+2025-03-26 19:22:14,642 INFO basehttp "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-standalone-preset.js HTTP/1.1" 304 0
+2025-03-26 19:22:14,642 INFO basehttp "GET /static/drf-yasg/insQ.min.js HTTP/1.1" 304 0
+2025-03-26 19:22:14,643 INFO basehttp "GET /static/drf-yasg/immutable.min.js HTTP/1.1" 304 0
+2025-03-26 19:22:14,729 INFO basehttp "GET /static/drf-yasg/style.css HTTP/1.1" 200 1047
+2025-03-26 19:22:14,732 INFO basehttp "GET /static/drf-yasg/swagger-ui-dist/swagger-ui.css HTTP/1.1" 200 145206
+2025-03-26 19:22:14,783 INFO basehttp - Broken pipe from ('127.0.0.1', 63539)
+2025-03-26 19:22:14,819 INFO basehttp "GET /swagger/?format=openapi HTTP/1.1" 200 6194
+2025-03-26 21:37:23,451 INFO utils Письмо успешно отправлено на shishka-danil@mail.com для registration
+2025-03-26 21:38:40,286 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 21:45:21,976 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 21:45:29,520 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.com, code=123456, purpose=registration
+2025-03-26 21:45:30,224 INFO utils Письмо успешно отправлено на shishka-danil@mail.com для registration
+2025-03-26 21:45:30,224 INFO tasks Email успешно отправлен: shishka-danil@mail.com для registration
+2025-03-26 21:46:02,326 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.com, code=123456, purpose=registration
+2025-03-26 21:46:04,109 INFO utils Письмо успешно отправлено на shishka-danil@mail.com для registration
+2025-03-26 21:46:04,110 INFO tasks Email успешно отправлен: shishka-danil@mail.com для registration
+2025-03-26 21:46:53,995 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.com, code=123456, purpose=registration
+2025-03-26 21:46:54,582 INFO utils Письмо успешно отправлено на shishka-danil@mail.com для registration
+2025-03-26 21:46:54,582 INFO tasks Email успешно отправлен: shishka-danil@mail.com для registration
+2025-03-26 21:47:08,916 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=123456, purpose=registration
+2025-03-26 21:47:09,482 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 21:47:09,482 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 21:50:10,471 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=123456, purpose=registration
+2025-03-26 21:50:11,143 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 21:50:11,143 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 21:54:57,238 INFO tasks Получено в Celery: 123
+2025-03-26 21:56:10,179 INFO tasks Получено в Celery: 123
+2025-03-26 22:00:54,164 INFO tasks Получено в Celery: 123
+2025-03-26 22:02:18,986 INFO tasks Получено в Celery: 123
+2025-03-26 22:09:07,878 INFO tasks Получено в Celery: 123
+2025-03-26 22:09:39,069 INFO tasks Получено в Celery: 123
+2025-03-26 22:15:11,210 INFO tasks Получено в Celery: 123
+2025-03-26 22:16:17,956 INFO tasks Получено в Celery: 123
+2025-03-26 22:17:04,078 INFO tasks Получено в Celery: 123
+2025-03-26 22:19:44,227 INFO tasks Удалено 5 просроченных кодов подтверждения
+2025-03-26 22:20:05,423 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:11,055 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:14,720 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:27,049 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:27,259 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:27,496 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:29,639 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:29,839 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:30,062 INFO tasks Получено в Celery: 123
+2025-03-26 22:20:30,278 INFO tasks Получено в Celery: 123
+2025-03-26 22:22:33,345 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=758417, purpose=registration
+2025-03-26 22:22:34,238 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 22:22:34,238 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 22:24:25,572 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:29:25,583 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:34:25,571 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:39:25,574 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:44:25,572 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:49:25,571 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:54:25,572 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 22:59:25,570 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:04:25,588 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:09:27,333 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:14:27,314 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:19:27,314 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:24:27,327 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:26:55,402 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=982161, purpose=registration
+2025-03-26 23:26:56,424 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 23:26:56,424 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 23:29:27,316 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:34:27,315 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:34:28,054 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=268564, purpose=registration
+2025-03-26 23:34:28,731 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 23:34:28,732 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 23:36:43,681 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=350711, purpose=registration
+2025-03-26 23:36:44,417 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 23:36:44,417 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 23:38:37,745 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=396077, purpose=registration
+2025-03-26 23:38:38,316 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 23:38:38,317 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 23:39:27,314 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:41:22,596 INFO tasks Отправка email с параметрами: email=shishka-danil@mail.ru, code=403392, purpose=registration
+2025-03-26 23:41:23,145 INFO utils Письмо успешно отправлено на shishka-danil@mail.ru для registration
+2025-03-26 23:41:23,146 INFO tasks Email успешно отправлен: shishka-danil@mail.ru для registration
+2025-03-26 23:44:27,314 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:49:27,321 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:54:27,342 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-26 23:59:27,322 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-27 00:04:27,320 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-27 00:09:27,322 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-27 00:14:27,321 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-27 00:19:27,319 INFO tasks Удалено 0 просроченных кодов подтверждения
+2025-03-27 00:24:27,335 INFO tasks Удалено 0 просроченных кодов подтверждения

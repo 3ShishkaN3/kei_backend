@@ -1,0 +1,121 @@
+2025-03-26 18:08:50,591 INFO Watching for file changes with StatReloader
+2025-03-26 18:08:54,462 WARNING Not Found: /
+2025-03-26 18:08:54,462 WARNING "GET / HTTP/1.1" 404 2541
+2025-03-26 18:08:54,545 WARNING Not Found: /favicon.ico
+2025-03-26 18:08:54,546 WARNING "GET /favicon.ico HTTP/1.1" 404 2592
+2025-03-26 18:09:00,313 WARNING Not Found: /auth
+2025-03-26 18:09:00,314 WARNING "GET /auth HTTP/1.1" 404 2571
+2025-03-26 18:09:28,027 INFO "GET /auth/register HTTP/1.1" 301 0
+2025-03-26 18:09:28,061 WARNING Method Not Allowed: /auth/register/
+2025-03-26 18:09:28,062 WARNING "GET /auth/register/ HTTP/1.1" 405 8748
+2025-03-26 18:09:28,284 INFO "GET /static/rest_framework/css/bootstrap.min.css HTTP/1.1" 200 121457
+2025-03-26 18:09:28,291 INFO "GET /static/rest_framework/js/csrf.js HTTP/1.1" 200 1793
+2025-03-26 18:09:28,293 INFO "GET /static/rest_framework/js/bootstrap.min.js HTTP/1.1" 200 39680
+2025-03-26 18:09:28,296 INFO "GET /static/rest_framework/js/prettify-min.js HTTP/1.1" 200 13632
+2025-03-26 18:09:28,296 INFO "GET /static/rest_framework/css/bootstrap-tweaks.css HTTP/1.1" 200 3426
+2025-03-26 18:09:28,298 INFO "GET /static/rest_framework/css/prettify.css HTTP/1.1" 200 817
+2025-03-26 18:09:28,299 INFO "GET /static/rest_framework/js/load-ajax-form.js HTTP/1.1" 200 59
+2025-03-26 18:09:28,299 INFO "GET /static/rest_framework/js/default.js HTTP/1.1" 200 1268
+2025-03-26 18:09:28,301 INFO "GET /static/rest_framework/js/ajax-form.js HTTP/1.1" 200 3796
+2025-03-26 18:09:28,301 INFO "GET /static/rest_framework/css/default.css HTTP/1.1" 200 1152
+2025-03-26 18:09:28,302 INFO "GET /static/rest_framework/js/jquery-3.7.1.min.js HTTP/1.1" 200 87533
+2025-03-26 18:09:28,308 INFO "GET /static/rest_framework/img/grid.png HTTP/1.1" 200 1458
+2025-03-26 18:09:35,409 INFO "GET /swagger HTTP/1.1" 301 0
+2025-03-26 18:09:35,416 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:09:35,441 INFO "GET /static/drf-yasg/style.css HTTP/1.1" 200 1047
+2025-03-26 18:09:35,442 INFO "GET /static/drf-yasg/insQ.min.js HTTP/1.1" 200 2093
+2025-03-26 18:09:35,444 INFO "GET /static/drf-yasg/swagger-ui-init.js HTTP/1.1" 200 15480
+2025-03-26 18:09:35,446 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui.css HTTP/1.1" 200 145206
+2025-03-26 18:09:35,449 INFO "GET /static/drf-yasg/immutable.min.js HTTP/1.1" 200 56904
+2025-03-26 18:09:35,450 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-standalone-preset.js HTTP/1.1" 200 322863
+2025-03-26 18:09:35,458 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-bundle.js HTTP/1.1" 200 1046583
+2025-03-26 18:09:35,570 INFO "GET /static/drf-yasg/swagger-ui-dist/favicon-32x32.png HTTP/1.1" 200 628
+2025-03-26 18:09:35,601 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 3245
+2025-03-26 18:16:12,260 INFO D:\kei_backend\auth_service\models.py changed, reloading.
+2025-03-26 18:16:12,813 INFO Watching for file changes with StatReloader
+2025-03-26 18:17:22,073 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:17:22,721 INFO Watching for file changes with StatReloader
+2025-03-26 18:17:39,754 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:17:40,368 INFO Watching for file changes with StatReloader
+2025-03-26 18:23:30,340 INFO D:\kei_backend\auth_service\models.py changed, reloading.
+2025-03-26 18:23:30,914 INFO Watching for file changes with StatReloader
+2025-03-26 18:23:32,455 INFO D:\kei_backend\auth_service\models.py changed, reloading.
+2025-03-26 18:23:33,029 INFO Watching for file changes with StatReloader
+2025-03-26 18:25:22,395 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:25:23,003 INFO Watching for file changes with StatReloader
+2025-03-26 18:26:33,372 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:26:33,909 INFO Watching for file changes with StatReloader
+2025-03-26 18:27:22,367 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:27:22,871 INFO Watching for file changes with StatReloader
+2025-03-26 18:27:47,326 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:27:47,955 INFO Watching for file changes with StatReloader
+2025-03-26 18:27:52,523 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:27:53,068 INFO Watching for file changes with StatReloader
+2025-03-26 18:27:56,582 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:27:57,155 INFO Watching for file changes with StatReloader
+2025-03-26 18:28:05,890 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:28:06,437 INFO Watching for file changes with StatReloader
+2025-03-26 18:28:13,135 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:28:13,645 INFO Watching for file changes with StatReloader
+2025-03-26 18:28:27,585 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:28:28,204 INFO Watching for file changes with StatReloader
+2025-03-26 18:28:33,871 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:28:35,078 INFO Watching for file changes with StatReloader
+2025-03-26 18:29:20,570 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:29:21,173 INFO Watching for file changes with StatReloader
+2025-03-26 18:29:26,868 INFO Watching for file changes with StatReloader
+2025-03-26 18:29:28,915 WARNING Not Found: /
+2025-03-26 18:29:28,916 WARNING "GET / HTTP/1.1" 404 2541
+2025-03-26 18:29:28,978 WARNING Not Found: /favicon.ico
+2025-03-26 18:29:28,978 INFO - Broken pipe from ('127.0.0.1', 60804)
+2025-03-26 18:29:32,493 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:29:32,524 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-bundle.js HTTP/1.1" 304 0
+2025-03-26 18:29:32,525 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-standalone-preset.js HTTP/1.1" 304 0
+2025-03-26 18:29:32,525 INFO "GET /static/drf-yasg/insQ.min.js HTTP/1.1" 304 0
+2025-03-26 18:29:32,526 INFO "GET /static/drf-yasg/immutable.min.js HTTP/1.1" 304 0
+2025-03-26 18:29:32,527 INFO "GET /static/drf-yasg/swagger-ui-init.js HTTP/1.1" 304 0
+2025-03-26 18:29:32,611 INFO "GET /static/drf-yasg/style.css HTTP/1.1" 200 1047
+2025-03-26 18:29:32,614 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui.css HTTP/1.1" 200 145206
+2025-03-26 18:29:32,664 INFO - Broken pipe from ('127.0.0.1', 60807)
+2025-03-26 18:29:32,696 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 3431
+2025-03-26 18:34:04,583 INFO D:\kei_backend\auth_service\urls.py changed, reloading.
+2025-03-26 18:34:05,161 INFO Watching for file changes with StatReloader
+2025-03-26 18:34:09,433 INFO Watching for file changes with StatReloader
+2025-03-26 18:34:10,951 WARNING Not Found: /
+2025-03-26 18:34:10,952 WARNING "GET / HTTP/1.1" 404 2541
+2025-03-26 18:34:10,986 WARNING Not Found: /favicon.ico
+2025-03-26 18:34:10,987 INFO - Broken pipe from ('127.0.0.1', 60917)
+2025-03-26 18:34:15,858 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:34:15,891 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-bundle.js HTTP/1.1" 304 0
+2025-03-26 18:34:15,892 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-standalone-preset.js HTTP/1.1" 304 0
+2025-03-26 18:34:15,893 INFO "GET /static/drf-yasg/insQ.min.js HTTP/1.1" 304 0
+2025-03-26 18:34:15,893 INFO "GET /static/drf-yasg/immutable.min.js HTTP/1.1" 304 0
+2025-03-26 18:34:15,894 INFO "GET /static/drf-yasg/swagger-ui-init.js HTTP/1.1" 304 0
+2025-03-26 18:34:15,981 INFO "GET /static/drf-yasg/style.css HTTP/1.1" 200 1047
+2025-03-26 18:34:15,984 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui.css HTTP/1.1" 200 145206
+2025-03-26 18:34:16,031 INFO "GET /static/drf-yasg/swagger-ui-dist/favicon-32x32.png HTTP/1.1" 200 628
+2025-03-26 18:34:16,071 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 4675
+2025-03-26 18:38:23,927 INFO Watching for file changes with StatReloader
+2025-03-26 18:38:27,558 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:38:27,573 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-bundle.js HTTP/1.1" 304 0
+2025-03-26 18:38:27,582 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui-standalone-preset.js HTTP/1.1" 304 0
+2025-03-26 18:38:27,583 INFO "GET /static/drf-yasg/swagger-ui-init.js HTTP/1.1" 304 0
+2025-03-26 18:38:27,583 INFO "GET /static/drf-yasg/immutable.min.js HTTP/1.1" 304 0
+2025-03-26 18:38:27,584 INFO "GET /static/drf-yasg/insQ.min.js HTTP/1.1" 304 0
+2025-03-26 18:38:27,671 INFO "GET /static/drf-yasg/swagger-ui-dist/swagger-ui.css HTTP/1.1" 200 145206
+2025-03-26 18:38:27,675 INFO "GET /static/drf-yasg/style.css HTTP/1.1" 200 1047
+2025-03-26 18:38:27,720 INFO - Broken pipe from ('127.0.0.1', 61112)
+2025-03-26 18:38:27,767 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 4675
+2025-03-26 18:39:25,004 INFO Watching for file changes with StatReloader
+2025-03-26 18:39:29,530 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:39:29,671 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 4675
+2025-03-26 18:39:29,700 INFO - Broken pipe from ('127.0.0.1', 61140)
+2025-03-26 18:39:39,953 INFO Watching for file changes with StatReloader
+2025-03-26 18:39:41,014 INFO "GET /swagger/ HTTP/1.1" 200 2211
+2025-03-26 18:39:41,131 INFO "GET /swagger/?format=openapi HTTP/1.1" 200 4675
+2025-03-26 18:42:23,331 INFO D:\kei_backend\auth_service\models.py changed, reloading.
+2025-03-26 18:42:23,838 INFO Watching for file changes with StatReloader
+2025-03-26 18:42:32,402 INFO D:\kei_backend\auth_service\models.py changed, reloading.
+2025-03-26 18:42:33,029 INFO Watching for file changes with StatReloader
+2025-03-26 18:42:59,470 INFO D:\kei_backend\auth_service\views.py changed, reloading.
+2025-03-26 18:42:59,982 INFO Watching for file changes with StatReloader

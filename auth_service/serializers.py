@@ -28,16 +28,27 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    username = serializers.CharField(required=False)
+    email = serializers.EmailField(required=False)
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        user = authenticate(username=data["username"], password=data["password"])
+        request = self.context.get("request")
+        username = data.get("username") or data.get("email") 
+        password = data.get("password")
+
+        if not username or not password:
+            raise serializers.ValidationError("Требуется username или email, а также пароль")
+
+        user = authenticate(request=request, username=username, password=password)
         if not user:
             raise serializers.ValidationError("Неверный логин или пароль")
         if not user.is_active:
             raise serializers.ValidationError("Ваш аккаунт отключен")
+
         return user
+
+
 
 class ConfirmEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -119,6 +130,12 @@ class ConfirmEmailChangeSerializer(serializers.Serializer):
         data["new_email"] = confirmation.target_email
         data["confirmation"] = confirmation
         return data
+    
+class ResendRegisterSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.lower()
     
 class EmptySerializer(serializers.Serializer):
     pass

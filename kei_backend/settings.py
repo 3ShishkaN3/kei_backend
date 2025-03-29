@@ -44,16 +44,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
+    'django.contrib.humanize',
     'rest_framework',
     'auth_service',
     'drf_yasg',
     'axes',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -118,8 +120,13 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+LOCALE_PATHS = [
+    os.path.join(BASE_DIR, 'locale'),
+]
+
+
 # Internationalization
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
@@ -134,16 +141,36 @@ AUTH_USER_MODEL = 'auth_service.User'
 # Безопасные cookie
 CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_NAME = "csrftoken"
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_DOMAIN = "localhost"
+
 SESSION_COOKIE_SECURE = True
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_NAME = 'sessionid'
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5000',
+    'https://keisenpai.com'
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:5000',
+    'https://keisenpai.com',
+]
+
 
 AUTHENTICATION_BACKENDS = [
-    'django.contrib.auth.backends.ModelBackend',
-    'axes.backends.AxesStandaloneBackend',
+    'auth_service.backends.EmailOrUsernameModelBackend',  # Подключаем кастомный бэкенд
+    'django.contrib.auth.backends.ModelBackend',  # Оставляем стандартный бэкенд
 ]
+
 
 AXES_ENABLED = True
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1
+AXES_USERNAME_CALLABLE = 'auth_service.axes_utils.get_axes_username'
 
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -174,6 +201,12 @@ LOGGING = {
             "filename": "logs/auth_service.log",
             "formatter": "detailed",
         },
+        "file_axes": { 
+            "level": "INFO",
+            "class": "logging.FileHandler",
+            "filename": "logs/axes.log",
+            "formatter": "detailed",
+        },
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "detailed",
@@ -185,5 +218,11 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "axes": {  # Логгер для Axes
+            "handlers": ["file_axes", "console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
+

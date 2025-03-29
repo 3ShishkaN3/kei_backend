@@ -1,13 +1,16 @@
 import datetime
 from django.contrib.auth import login, logout
 from django.utils import timezone
-from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status, permissions
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from .models import ConfirmationCode, User
 from .tasks import send_confirmation_email_task
+from django.middleware.csrf import get_token
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer, 
@@ -18,19 +21,48 @@ from .serializers import (
     RequestEmailChangeSerializer,
     ConfirmEmailChangeSerializer,
     EmptySerializer,
+    ResendRegisterSerializer,
 )
+
+class CSRFTokenView(APIView):
+    @csrf_exempt
+    def get(self, request, *args, **kwargs):
+        csrf_token = get_token(request)
+        return Response({"csrf_token": csrf_token}, status=status.HTTP_200_OK)
 
 class RegisterView(GenericAPIView):
     serializer_class = RegisterSerializer
 
     def post(self, request):
+        
+        data = request.data.copy()
+        data["email"] = data.get("email", "").lower()
+        username = data.get("username")
+        email = data.get("email")
+
+        try:
+            user = User.objects.get(email=email, username=username)
+
+            if (
+                not user.is_active and 
+                (timezone.now() - user.date_joined) < datetime.timedelta(minutes=25) and 
+                user.confirmation_codes.filter(expires_at__gt=timezone.now()).exists()
+            ):
+                return Response(
+                    {"message": "Ожидает подтверждения"},
+                    status=status.HTTP_200_OK
+                )
+        except User.DoesNotExist:
+            pass
+
+        
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.REGISTRATION,
-                expires_at=timezone.now() + datetime.timedelta(minutes=10)
+                expires_at=timezone.now() + datetime.timedelta(minutes=20)
             )
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response(
@@ -46,12 +78,19 @@ class LoginView(GenericAPIView):
     serializer_class = LoginSerializer
 
     def post(self, request):
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             user = serializer.validated_data
             login(request, user)
             return Response({"message": "Вы успешно вошли"}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class UserView(APIView):
+    def get(self, request):
+        if request.user.is_authenticated:
+            return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Пользователь не авторизован."}, status=status.HTTP_401_UNAUTHORIZED)
 
 class LogoutView(GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -168,4 +207,28 @@ class ConfirmEmailChangeView(GenericAPIView):
                 user.save()
                 confirmation.delete()
                 return Response({"message": "Email успешно изменён."})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class RegisterResendView(GenericAPIView):
+    serializer_class = ResendRegisterSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data["email"]
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response({"error": "Пользователь с таким email не найден."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if user.is_active:
+                return Response({"error": "Аккаунт уже активирован."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            confirmation = ConfirmationCode.objects.create(
+                user=user,
+                code_type=ConfirmationCode.REGISTRATION,
+                expires_at=timezone.now() + datetime.timedelta(minutes=10)
+            )
+            send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
+            return Response({"message": "Код подтверждения повторно отправлен."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

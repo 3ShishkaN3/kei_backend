@@ -104,6 +104,7 @@ class ConfirmPasswordResetSerializer(serializers.Serializer):
 
 class RequestEmailChangeSerializer(serializers.Serializer):
     new_email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
 
     def validate_new_email(self, value):
         value = value.lower()
@@ -111,26 +112,55 @@ class RequestEmailChangeSerializer(serializers.Serializer):
             raise serializers.ValidationError("Этот email уже используется.")
         return value
 
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.check_password(data.get("password", "")):
+            raise serializers.ValidationError({"password": "Неверный пароль."})
+        return data
+
 class ConfirmEmailChangeSerializer(serializers.Serializer):
-    current_email = serializers.EmailField()
     code = serializers.CharField(max_length=6)
 
     def validate(self, data):
-        try:
-            user = User.objects.get(email=data["current_email"].lower())
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Пользователь не найден.")
-        qs = ConfirmationCode.objects.filter(user=user, code=data["code"], code_type=ConfirmationCode.EMAIL_CHANGE)
+        code = data["code"]
+        qs = ConfirmationCode.objects.filter(code=code, code_type=ConfirmationCode.EMAIL_CHANGE)
         if not qs.exists():
             raise serializers.ValidationError("Неверный код подтверждения.")
         confirmation = qs.first()
         if confirmation.is_expired():
             raise serializers.ValidationError("Код подтверждения истёк.")
-        data["user"] = user
+        data["user"] = confirmation.user
         data["new_email"] = confirmation.target_email
         data["confirmation"] = confirmation
         return data
-    
+
+class RequestPasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.check_password(data.get("current_password", "")):
+            raise serializers.ValidationError({"current_password": "Неверный текущий пароль."})
+        validate_password(data.get("new_password"), user)
+        return data
+
+class ConfirmPasswordChangeSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=6)
+
+    def validate(self, data):
+        code = data["code"]
+        qs = ConfirmationCode.objects.filter(code=code, code_type=ConfirmationCode.PASSWORD_CHANGE)
+        if not qs.exists():
+            raise serializers.ValidationError("Неверный код подтверждения.")
+        confirmation = qs.first()
+        if confirmation.is_expired():
+            raise serializers.ValidationError("Код подтверждения истёк.")
+        data["user"] = confirmation.user
+        data["new_password"] = confirmation.target_password
+        data["confirmation"] = confirmation
+        return data
+
 class ResendRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
 

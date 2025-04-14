@@ -1,3 +1,4 @@
+# models.py
 import datetime
 import random
 from django.utils import timezone
@@ -43,6 +44,7 @@ class ConfirmationCode(models.Model):
     code = models.CharField(max_length=6)
     code_type = models.CharField(max_length=20, choices=CODE_TYPE_CHOICES)
     target_email = models.EmailField(blank=True, null=True)
+    target_password = models.CharField(max_length=128, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 

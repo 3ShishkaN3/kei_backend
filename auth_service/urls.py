@@ -3,6 +3,7 @@ from .views import (
     CSRFTokenView, RegisterView, LoginView, LogoutView, UserRoleView,
     RegistrationConfirmView, RequestPasswordResetView, ConfirmPasswordResetView,
     RequestEmailChangeView, ConfirmEmailChangeView, UserView, RegisterResendView,
+    RequestPasswordChangeView, ConfirmPasswordChangeView,
 )
 
 urlpatterns = [
@@ -21,6 +22,9 @@ urlpatterns = [
     # Смена пароля
     path("password/reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
     path("password/reset/confirm/", ConfirmPasswordResetView.as_view(), name="password-reset-confirm"),
+    path("password/change/request/", RequestPasswordChangeView.as_view(), name="password-change-request"),
+    path("password/change/confirm/", ConfirmPasswordChangeView.as_view(), name="password-change-confirm"),
+
     
     # Смена email
     path("email/change/request/", RequestEmailChangeView.as_view(), name="email-change-request"),

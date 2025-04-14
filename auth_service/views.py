@@ -2,6 +2,7 @@ import datetime
 from django.contrib.auth import login, logout
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.hashers import make_password
 from rest_framework import status, permissions
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
@@ -22,6 +23,8 @@ from .serializers import (
     ConfirmEmailChangeSerializer,
     EmptySerializer,
     ResendRegisterSerializer,
+    RequestPasswordChangeSerializer,
+    ConfirmPasswordChangeSerializer,
 )
 
 class CSRFTokenView(APIView):
@@ -175,10 +178,11 @@ class RequestEmailChangeView(GenericAPIView):
     serializer_class = RequestEmailChangeSerializer
 
     def post(self, request):
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             new_email = serializer.validated_data["new_email"]
             user = request.user
+            # Создаем подтверждение изменения email с target_email = new_email
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.EMAIL_CHANGE,
@@ -189,7 +193,6 @@ class RequestEmailChangeView(GenericAPIView):
             return Response({"message": "Код подтверждения отправлен на новый email."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class ConfirmEmailChangeView(GenericAPIView):
     serializer_class = ConfirmEmailChangeSerializer
 
@@ -199,7 +202,7 @@ class ConfirmEmailChangeView(GenericAPIView):
             user = serializer.validated_data["user"]
             new_email = serializer.validated_data["new_email"]
             confirmation = serializer.validated_data["confirmation"]
-            
+
             if User.objects.filter(email=new_email).exists():
                 return Response({"error": "Этот email уже используется."}, status=status.HTTP_400_BAD_REQUEST)
             else:
@@ -231,4 +234,42 @@ class RegisterResendView(GenericAPIView):
             )
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response({"message": "Код подтверждения повторно отправлен."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RequestPasswordChangeView(GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = RequestPasswordChangeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            user = request.user
+            new_password = serializer.validated_data["new_password"]
+            hashed_new_password = make_password(new_password)
+            confirmation = ConfirmationCode.objects.create(
+                user=user,
+                code_type=ConfirmationCode.PASSWORD_CHANGE,
+                target_password=hashed_new_password,
+                expires_at=timezone.now() + datetime.timedelta(minutes=10)
+            )
+            send_confirmation_email_task.delay(user.email, confirmation.code, "password_change")
+            return Response({"message": "Код подтверждения для смены пароля отправлен на вашу почту."})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ConfirmPasswordChangeView(GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ConfirmPasswordChangeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data["user"]
+            new_password = serializer.validated_data["new_password"]
+            confirmation = serializer.validated_data["confirmation"]
+
+            user.password = new_password
+            user.save()
+            confirmation.delete()
+            return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

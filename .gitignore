@@ -1,6 +1,6 @@
 logs/*
 .env
-celerybeat-shedule.*
+celerybeat-schedule.*
 db.sqlite3
 dump.*
 */__pycache__

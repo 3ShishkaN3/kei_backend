@@ -5,10 +5,11 @@ class Course(models.Model):
     STATUS_CHOICES = (
         ('draft', 'Черновик'),
         ('published', 'Опубликован'),
-        ('archived', 'Архив'),
+        ('free', 'Бесплатно'),
     )
     
     title = models.CharField(max_length=255)
+    subtitle = models.CharField(max_length=255)
     description = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     cover_image = models.ImageField(upload_to='course_covers/', null=True, blank=True)

@@ -1,12 +1,14 @@
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from auth_service.models import User
 from .permissions import IsAdminTeacherAssistantOrReadOnly, IsAdminTeacherOrReadOnly
 from .models import Course, CourseTeacher, CourseAssistant, CourseEnrollment
-from .utils import send_to_kafka
+from kei_backend.utils import send_to_kafka
 from .serializers import (
     CourseListSerializer,
     CourseDetailSerializer,
@@ -22,14 +24,21 @@ class CourseViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
+        user = self.request.user
         queryset = Course.objects.all()
         
-        if self.request.user.is_authenticated and self.request.user.role in ['admin', 'teacher', 'assistant']:
+        if user.is_authenticated and user.role in ['admin', 'teacher', 'assistant']:
             status_filter = self.request.query_params.get('status')
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
         else:
             queryset = queryset.filter(status='published')
+        
+
+        if user.is_authenticated and user.role not in ['admin', 'teacher', 'assistant']:
+            queryset = Course.objects.filter(
+                Q(status='free') | Q(enrollments__student=user)
+            ).distinct()
         
         created_by = self.request.query_params.get('created_by')
         if created_by:
@@ -43,7 +52,9 @@ class CourseViewSet(viewsets.ModelViewSet):
         return CourseDetailSerializer
     
     def get_permissions(self):
-        if self.action in ['destroy']:
+        if self.action == 'enroll':
+            permission_classes = [IsAuthenticated]
+        elif self.action in ['destroy']:
             permission_classes = [IsAuthenticated, IsAdminTeacherOrReadOnly]
         else:
             permission_classes = [IsAuthenticated, IsAdminTeacherAssistantOrReadOnly]
@@ -51,29 +62,66 @@ class CourseViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
-        
-    @action(detail=True, methods=['post'])
-    def enroll(self, request, pk=None):
+
+    
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    def enrollment_status(self, request, pk=None):
+        """
+        Возвращает статус записи текущего пользователя на курс.
+        Если пользователь не записан — возвращает enrolled: False.
+        Если записан — возвращает enrolled: True и статус записи.
+        """
         course = self.get_object()
         user = request.user
+
+        try:
+            enrollment = CourseEnrollment.objects.get(course=course, student=user)
+            return Response({
+                "enrolled": True,
+                "status": enrollment.status,
+                "enrollment_id": enrollment.id,
+                "enrolled_at": enrollment.enrolled_at,
+                "completed_at": enrollment.completed_at
+            }, status=status.HTTP_200_OK)
+        except CourseEnrollment.DoesNotExist:
+            return Response({"enrolled": False}, status=status.HTTP_200_OK)
         
-        if CourseTeacher.objects.filter(course=course, teacher=user).exists() or \
-            CourseAssistant.objects.filter(course=course, assistant=user).exists():
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def enroll(self, request, pk=None):
+        course = self.get_object()
+        
+        student_id = request.data.get('student_id')
+        if student_id:
+            if request.user.role not in ['admin', 'teacher']:
                 return Response(
-                    {"error": "Вы не можете записаться на курс, так как являетесь преподавателем или помощником"},
+                    {"error": "Нет прав для записи ученика на курс"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            student = get_object_or_404(User, pk=student_id)
+        else:
+            if course.status != 'free':
+                return Response(
+                    {"error": "Самостоятельная запись доступна только для бесплатных курсов"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            student = request.user
+        
+        if CourseTeacher.objects.filter(course=course, teacher=student).exists() or \
+           CourseAssistant.objects.filter(course=course, assistant=student).exists():
+            return Response(
+                {"error": "Невозможно записать на курс, так как пользователь является преподавателем или помощником"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         enrollment, created = CourseEnrollment.objects.get_or_create(
             course=course,
-            student=user,
+            student=student,
             defaults={'status': 'active'}
         )
-        
         if not created:
             if enrollment.status == 'active':
                 return Response(
-                    {"error": "Вы уже записаны на этот курс"},
+                    {"error": "Пользователь уже записан на этот курс"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             else:
@@ -82,65 +130,74 @@ class CourseViewSet(viewsets.ModelViewSet):
         
         send_to_kafka('course_events', {
             'type': 'enrollment',
-            'user_id': user.id,
+            'user_id': student.id,
             'course_id': course.id,
             'timestamp': timezone.now().isoformat()
         })
         
         return Response({
-            "success": "Вы успешно записались на курс",
+            "success": "Пользователь успешно записан на курс",
             "enrollment": CourseEnrollmentSerializer(enrollment).data
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'])
     def leave(self, request, pk=None):
+        if 'student_id' not in request.data:
+            return Response(
+                {"error": "Отчисление может быть выполнено только преподавателем или администратором для указанного ученика"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        student = get_object_or_404(User, pk=request.data['student_id'])
         course = self.get_object()
-        user = request.user
         
         try:
-            enrollment = CourseEnrollment.objects.get(course=course, student=user, status='active')
+            enrollment = CourseEnrollment.objects.get(course=course, student=student, status='active')
             enrollment.status = 'dropped'
             enrollment.save()
             
             send_to_kafka('course_events', {
                 'type': 'leave_course',
-                'user_id': user.id,
+                'user_id': student.id,
                 'course_id': course.id,
                 'timestamp': timezone.now().isoformat()
             })
             
-            return Response({"success": "Вы отчислены из курса"})
+            return Response({"success": "Пользователь отчислен из курса"})
         except CourseEnrollment.DoesNotExist:
             return Response(
-                {"error": "Вы не записаны на этот курс"},
+                {"error": "Пользователь не записан на курс или уже отчислен"},
                 status=status.HTTP_400_BAD_REQUEST
             )
     
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
+        if 'student_id' not in request.data:
+            return Response(
+                {"error": "Завершение курса может быть выполнено только преподавателем или администратором для указанного ученика"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        student = get_object_or_404(User, pk=request.data['student_id'])
         course = self.get_object()
-        user = request.user
         
         try:
-            enrollment = CourseEnrollment.objects.get(course=course, student=user, status='active')
+            enrollment = CourseEnrollment.objects.get(course=course, student=student, status='active')
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()
             enrollment.save()
             
             send_to_kafka('course_events', {
                 'type': 'course_completed',
-                'user_id': user.id,
+                'user_id': student.id,
                 'course_id': course.id,
                 'timestamp': timezone.now().isoformat()
             })
             
-            return Response({"success": "Поздравляем с завершением курса!"})
+            return Response({"success": "Курс успешно завершён для ученика"})
         except CourseEnrollment.DoesNotExist:
             return Response(
-                {"error": "Вы не записаны на этот курс"},
+                {"error": "Пользователь не записан на курс или курс уже завершён/отчислен"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
 
 class CourseTeacherViewSet(viewsets.ModelViewSet):
     serializer_class = CourseTeacherSerializer
@@ -161,7 +218,6 @@ class CourseTeacherViewSet(viewsets.ModelViewSet):
             'timestamp': timezone.now().isoformat()
         })
 
-
 class CourseAssistantViewSet(viewsets.ModelViewSet):
     serializer_class = CourseAssistantSerializer
     permission_classes = [IsAuthenticated, IsAdminTeacherOrReadOnly]
@@ -180,7 +236,6 @@ class CourseAssistantViewSet(viewsets.ModelViewSet):
             'course_id': course.id,
             'timestamp': timezone.now().isoformat()
         })
-
 
 class CourseEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CourseEnrollmentSerializer

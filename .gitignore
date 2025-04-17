@@ -4,6 +4,10 @@ celerybeat-shedule.*
 db.sqlite3
 dump.*
 */__pycache__
+__pycache__
+*.log
 *.bak
 *.dat
 *.dir
+media/*
+*mypy_cache/

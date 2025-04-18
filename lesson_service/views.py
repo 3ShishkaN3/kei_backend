@@ -7,20 +7,20 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
-from .models import Lesson, Section, SectionCompletion, LessonCompletion
+from .models import Lesson, Section, SectionCompletion, LessonCompletion, SectionItem
 from .serializers import (
     LessonListSerializer, LessonDetailSerializer, SectionSerializer,
     SectionCompletionSerializer, LessonCompletionSerializer
 )
 from .permissions import LessonPermission, SectionPermission, CanComplete, IsCourseStaffOrAdmin, CanViewLessonOrSectionContent
 from kei_backend.utils import send_to_kafka
-
+from .serializers import SectionItemSerializer, CONTENT_TYPE_MAP
 from course_service.models import Course
 
 class LessonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, LessonPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['title', 'subtitle', 'description']
+    search_fields = ['title',]
     ordering_fields = ['created_at', 'title', 'updated_at']
     ordering = ['-created_at']
 
@@ -132,13 +132,12 @@ class SectionViewSet(viewsets.ModelViewSet):
     ordering = ['order']
 
     def get_queryset(self):
-        course_pk = self.kwargs.get('course_pk')
         lesson_pk = self.kwargs.get('lesson_pk')
 
-        if not course_pk or not lesson_pk:
+        if not lesson_pk:
             return Section.objects.none()
 
-        lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
+        lesson = get_object_or_404(Lesson, pk=lesson_pk)
 
 
         if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, lesson):
@@ -147,9 +146,8 @@ class SectionViewSet(viewsets.ModelViewSet):
         return Section.objects.filter(lesson=lesson)
 
     def perform_create(self, serializer):
-        course_pk = self.kwargs.get('course_pk')
         lesson_pk = self.kwargs.get('lesson_pk')
-        lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
+        lesson = get_object_or_404(Lesson, pk=lesson_pk)
 
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, lesson):
              self.permission_denied(self.request, message="У вас нет прав на добавление разделов в этот урок.")
@@ -228,3 +226,157 @@ class SectionViewSet(viewsets.ModelViewSet):
                     {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
                     status=status.HTTP_200_OK
                 )
+            
+class SectionItemViewSet(viewsets.ModelViewSet):
+    """ViewSet для управления элементами раздела (SectionItem)."""
+    serializer_class = SectionItemSerializer
+    permission_classes = [IsAuthenticated] # Добавляем кастомный пермишен ниже
+
+    def get_queryset(self):
+        """Фильтруем элементы по ID раздела из URL."""
+        section_pk = self.kwargs.get('section_pk')
+        if not section_pk:
+            return SectionItem.objects.none()
+
+        # Проверяем доступ к родительскому разделу (и уроку/курсу)
+        section = get_object_or_404(
+            Section.objects.select_related('lesson__course'), # Для проверки прав
+            pk=section_pk,
+            # Добавляем проверку из kwargs родительских роутеров
+            lesson_id=self.kwargs.get('lesson_pk'),
+            lesson__course_id=self.kwargs.get('course_pk')
+        )
+        # Используем CanViewLessonOrSectionContent для проверки доступа к разделу
+        if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, section):
+            self.permission_denied(self.request, message="У вас нет доступа к этому разделу.")
+
+        return SectionItem.objects.filter(section=section).select_related('content_type') # Добавляем content_type для оптимизации
+
+    def get_permissions(self):
+        """Устанавливаем права: Просмотр для тех, кто видит раздел, Запись - для персонала курса."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Для записи нужны права персонала
+            return [IsAuthenticated(), IsCourseStaffOrAdmin()] # IsCourseStaffOrAdmin проверит права на раздел/урок/курс
+        # Для чтения (list, retrieve)
+        return [IsAuthenticated(), CanViewLessonOrSectionContent()] # Проверит доступ к разделу
+
+    def _get_section(self):
+        """Вспомогательная функция для получения объекта Section."""
+        return get_object_or_404(
+            Section,
+            pk=self.kwargs['section_pk'],
+            lesson_id=self.kwargs.get('lesson_pk'),
+            lesson__course_id=self.kwargs.get('course_pk')
+        )
+
+    def perform_create(self, serializer):
+        section = self._get_section()
+        # Права уже проверены в get_permissions -> IsCourseStaffOrAdmin
+
+        # Определяем порядок
+        max_order = SectionItem.objects.filter(section=section).aggregate(Max('order'))['order__max']
+        current_order = (max_order or 0) + 1
+        # Позволяем переопределить порядок из запроса, если нужно
+        order = serializer.validated_data.get('order', current_order)
+
+        item_type = serializer.validated_data['item_type']
+        content_data = serializer.validated_data.get('validated_content_data') # Используем валидированные данные
+        existing_type = serializer.validated_data.get('existing_content_type')
+        existing_id = serializer.validated_data.get('existing_content_id')
+
+        content_object = None
+        content_type = None
+
+        try:
+            with transaction.atomic():
+                if content_data:
+                     # Создаем новый контент в material_service
+                    model_class = CONTENT_TYPE_MAP[item_type]['model']
+                    serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
+                    # Используем сериализатор для создания объекта
+                    # Передаем request в контекст для perform_create вложенного сериализатора (если он использует created_by)
+                    context = {'request': self.request}
+                    content_serializer = serializer_class(data=content_data, context=context)
+                    content_serializer.is_valid(raise_exception=True) # Должно быть валидно после validate
+                    # Если у вложенного сериализатора нет perform_create, user не установится
+                    # Можно передать user явно: content_object = content_serializer.save(created_by=self.request.user)
+                    content_object = content_serializer.save()
+                    content_type = ContentType.objects.get_for_model(model_class)
+
+                elif existing_type and existing_id:
+                     # Связываем с существующим
+                    model_class = CONTENT_TYPE_MAP[existing_type]['model']
+                    content_object = model_class.objects.get(pk=existing_id) # Уже проверено в validate
+                    content_type = ContentType.objects.get_for_model(model_class)
+                else:
+                    # Эта ситуация не должна возникать из-за validate
+                    raise ValueError("Ошибка в логике валидации: нет данных для контента.")
+
+                # Создаем SectionItem
+                serializer.save(
+                    section=section,
+                    order=order,
+                    content_type=content_type,
+                    object_id=content_object.pk,
+                    # Убираем лишние поля из validated_data перед сохранением
+                    content_data=None,
+                    existing_content_type=None,
+                    existing_content_id=None
+                )
+        except Exception as e:
+             # Логирование ошибки e
+             # Если контент был создан, но SectionItem нет - откатываем транзакцию
+             raise serializers.ValidationError(f"Не удалось создать элемент раздела: {e}")
+
+
+    def perform_update(self, serializer):
+        # Логика обновления может быть сложной, если разрешено менять тип контента
+        # или переключаться между созданием нового и связью с существующим.
+        # Пока реализуем простое обновление order и опционально - контента.
+
+        section = self._get_section() # Родительский раздел не меняется
+        item_type = serializer.validated_data.get('item_type', self.get_object().item_type) # Тип тоже обычно не меняется
+        content_data = serializer.validated_data.get('validated_content_data')
+        existing_type = serializer.validated_data.get('existing_content_type')
+        existing_id = serializer.validated_data.get('existing_content_id')
+
+        current_instance = serializer.instance
+        content_object = current_instance.content_object
+        content_type = current_instance.content_type
+
+        try:
+            with transaction.atomic():
+                # Обновление связанного контента (если передан content_data)
+                if content_data and item_type in CONTENT_TYPE_MAP:
+                    serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
+                    context = {'request': self.request}
+                    content_serializer = serializer_class(instance=content_object, data=content_data, partial=True, context=context)
+                    if content_serializer.is_valid(raise_exception=True):
+                        content_object = content_serializer.save() # Обновляем контент
+
+                # Смена связи на существующий контент (если переданы existing_*)
+                elif existing_type and existing_id:
+                     if existing_type == item_type: # Убедимся еще раз
+                         model_class = CONTENT_TYPE_MAP[existing_type]['model']
+                         new_content_object = model_class.objects.get(pk=existing_id)
+                         new_content_type = ContentType.objects.get_for_model(model_class)
+                         # Обновляем GenericForeignKey в SectionItem
+                         current_instance.content_type = new_content_type
+                         current_instance.object_id = new_content_object.pk
+                         content_object = new_content_object # Обновляем для сохранения
+                         content_type = new_content_type
+                     else:
+                          raise serializers.ValidationError("Несоответствие типа при смене связи контента.")
+
+                # Сохраняем сам SectionItem (обновляем order и, возможно, GenericForeignKey)
+                serializer.save(
+                     content_object=content_object, # Передаем объект для обновления FK
+                     content_type=content_type,
+                     object_id=content_object.pk,
+                     # Убираем лишние поля
+                     content_data=None,
+                     existing_content_type=None,
+                     existing_content_id=None
+                )
+        except Exception as e:
+             raise serializers.ValidationError(f"Не удалось обновить элемент раздела: {e}")

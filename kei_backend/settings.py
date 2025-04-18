@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     'user_service',
     'course_service',
     'lesson_service',
+    'material_service',
 ]
 
 MIDDLEWARE = [

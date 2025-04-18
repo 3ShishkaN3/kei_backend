@@ -1,7 +1,7 @@
 # lesson_service/urls.py
 from django.urls import path, include
 from rest_framework_nested import routers
-from .views import LessonViewSet, SectionViewSet
+from .views import LessonViewSet, SectionViewSet, SectionItemViewSet
 
 lesson_router = routers.SimpleRouter()
 lesson_router.register(r'', LessonViewSet, basename='') 
@@ -9,8 +9,12 @@ lesson_router.register(r'', LessonViewSet, basename='')
 sections_router = routers.NestedSimpleRouter(lesson_router, r'', lookup='lesson')
 sections_router.register(r'sections', SectionViewSet, basename='lesson-sections')
 
+router_for_items = routers.NestedSimpleRouter(sections_router, r'sections', lookup='section')
+router_for_items.register(r'items', SectionItemViewSet, basename='section-items')
+
 urlpatterns = [
     path('', include(sections_router.urls)), 
+    path('', include(router_for_items.urls)),
 ]
 
 

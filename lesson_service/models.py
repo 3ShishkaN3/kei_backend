@@ -155,8 +155,7 @@ class SectionItem(models.Model):
         ContentType,
         on_delete=models.CASCADE,
         verbose_name="Тип контента",
-        # Ограничиваем выбор только моделями из material_service (когда он будет создан)
-        # limit_choices_to={'app_label': 'material_service'} # Раскомментировать позже
+        limit_choices_to={'app_label': 'material_service'}
     )
     object_id = models.PositiveIntegerField(
         verbose_name="ID объекта контента"

@@ -54,10 +54,6 @@ class Section(models.Model):
         help_text="Порядок отображения раздела в уроке"
     )
 
-    # Здесь можно добавить ForeignKey на модели материалов или тестов,
-    # когда эти сервисы будут готовы.
-    # material = models.ForeignKey('material_service.Material', null=True, blank=True, on_delete=models.SET_NULL)
-    # test = models.ForeignKey('test_service.Test', null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 

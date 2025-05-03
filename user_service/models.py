@@ -29,3 +29,4 @@ class UserSettings(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="settings")
     theme = models.CharField(max_length=10, choices=THEME_CHOICES, default="light")
     show_test_answers = models.BooleanField(default=True)
+    show_learned_items = models.BooleanField(default=True)

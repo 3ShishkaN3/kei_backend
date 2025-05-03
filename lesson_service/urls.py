@@ -1,20 +1,37 @@
-# lesson_service/urls.py
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework_nested import routers
-from .views import LessonViewSet, SectionViewSet, SectionItemViewSet
+from .views import (
+    LessonViewSet,
+    SectionViewSet,
+    SectionItemViewSet,
+)
+from dict_service.views import PrimaryLessonEntriesViewSet
 
-lesson_router = routers.SimpleRouter()
-lesson_router.register(r'', LessonViewSet, basename='') 
+# Базовый роутер для уроков
+router = routers.SimpleRouter()
+router.register(r'', LessonViewSet, basename='lesson')
 
-sections_router = routers.NestedSimpleRouter(lesson_router, r'', lookup='lesson')
+# 1) разделы внутри урока
+sections_router = routers.NestedSimpleRouter(router, r'', lookup='lesson')
 sections_router.register(r'sections', SectionViewSet, basename='lesson-sections')
 
-router_for_items = routers.NestedSimpleRouter(sections_router, r'sections', lookup='section')
-router_for_items.register(r'items', SectionItemViewSet, basename='section-items')
+# 2) элементы раздела внутри раздела
+items_router = routers.NestedSimpleRouter(sections_router, r'sections', lookup='section')
+items_router.register(r'items', SectionItemViewSet, basename='section-items')
+
+# 3) primary_dictionary_entries внутри урока
+primary_router = routers.NestedSimpleRouter(router, r'', lookup='lesson')
+primary_router.register(
+    r'primary_dictionary_entries',
+    PrimaryLessonEntriesViewSet,
+    basename='lesson-primary-entries'
+)
 
 urlpatterns = [
-    path('', include(sections_router.urls)), 
-    path('', include(router_for_items.urls)),
+    path('', include(router.urls)),
+    path('', include(sections_router.urls)),
+    path('', include(items_router.urls)),     
+    path('', include(primary_router.urls)), 
 ]
 
 

@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
+from rest_framework.pagination import PageNumberPagination
 from .models import Lesson, Section, SectionCompletion, LessonCompletion, SectionItem
 from .serializers import (
     LessonListSerializer, LessonDetailSerializer, SectionSerializer,
@@ -17,8 +18,16 @@ from kei_backend.utils import send_to_kafka
 from .serializers import SectionItemSerializer, CONTENT_TYPE_MAP
 from course_service.models import Course
 
+
+class LessonPagination(PageNumberPagination):
+    page_size = 4
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class LessonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, LessonPermission]
+    pagination_class = LessonPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title',]
     ordering_fields = ['created_at', 'title', 'updated_at']

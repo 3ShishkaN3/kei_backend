@@ -2,11 +2,10 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
-from rest_framework import viewsets, status, filters
+from rest_framework import viewsets, status, filters, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import serializers
 from rest_framework.pagination import PageNumberPagination
 from .models import Lesson, Section, SectionCompletion, LessonCompletion, SectionItem
 from .serializers import (
@@ -235,6 +234,89 @@ class SectionViewSet(viewsets.ModelViewSet):
                     {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
                     status=status.HTTP_200_OK
                 )
+                
+    @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
+    def reorder_sections(self, request, lesson_pk=None, course_pk=None): # course_pk будет из URL
+        """
+        Изменяет порядок разделов в указанном уроке.
+        Ожидает POST-запрос с телом: [{"id": section_id1, "order": new_order1}, {"id": section_id2, "order": new_order2}, ...]
+        """
+        lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
+
+        data = request.data
+        if not isinstance(data, list):
+            return Response({"error": "Ожидается список объектов с 'id' и 'order'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        updates_map = {}  # {section_id: new_order}
+        new_orders_set = set()
+        section_ids_from_payload = []
+
+        for item in data:
+            if not isinstance(item, dict) or 'id' not in item or 'order' not in item:
+                return Response({"error": "Каждый элемент должен быть словарем с 'id' и 'order'."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                section_id = int(item.get('id'))
+                new_order = int(item.get('order'))
+            except (ValueError, TypeError):
+                 return Response({"error": "ID и order должны быть целыми числами."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if new_order < 0:
+                return Response({"error": "Порядок (order) не может быть отрицательным."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if new_order in new_orders_set:
+                return Response({"error": f"Порядок {new_order} указан более одного раза в запросе."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            new_orders_set.add(new_order)
+            section_ids_from_payload.append(section_id)
+            updates_map[section_id] = new_order
+        
+        sections_to_update_qs = Section.objects.filter(lesson=lesson, id__in=section_ids_from_payload)
+        
+        if sections_to_update_qs.count() != len(section_ids_from_payload):
+            found_ids = set(sections_to_update_qs.values_list('id', flat=True))
+            missing_ids = [sid for sid in section_ids_from_payload if sid not in found_ids]
+            return Response(
+                {"error": "Одна или несколько указанных секций не найдены или не принадлежат этому уроку.",
+                 "missing_section_ids": missing_ids}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        conflicting_sections_qs = Section.objects.filter(lesson=lesson, order__in=new_orders_set)\
+                                                 .exclude(id__in=section_ids_from_payload)
+        if conflicting_sections_qs.exists():
+            conflict_details = {s.id: s.order for s in conflicting_sections_qs}
+            return Response(
+                {"error": "Некоторые из новых порядков уже заняты другими разделами этого урока (которые не были включены в текущий запрос на изменение порядка).",
+                 "conflicts_with_other_sections": conflict_details},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                
+                sections_to_update_list = list(sections_to_update_qs) 
+
+                max_existing_order = Section.objects.filter(lesson=lesson).aggregate(max_o=models.Max('order'))['max_o'] or 0
+                temp_order_start = -1 * (max_existing_order + len(sections_to_update_list) + 10) # Добавим запас
+
+                for i, section_instance in enumerate(sections_to_update_list):
+                    section_instance.order = temp_order_start - i # Уникальный отрицательный order
+                    section_instance.save(update_fields=['order'])
+                
+                for section_id, target_order in updates_map.items():
+                    section_to_set_final_order = Section.objects.get(pk=section_id, lesson=lesson) # Получаем актуальный инстанс
+                    section_to_set_final_order.order = target_order
+                    section_to_set_final_order.save(update_fields=['order'])
+            
+            updated_sections_qs = Section.objects.filter(lesson=lesson).order_by('order')
+            serializer = self.get_serializer(updated_sections_qs, many=True, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except IntegrityError as e:
+            return Response({"error": f"Ошибка целостности базы данных при обновлении порядка: {e}. Пожалуйста, проверьте данные."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            return Response({"error": f"Произошла непредвиденная ошибка: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
 class SectionItemViewSet(viewsets.ModelViewSet):
     """ViewSet для управления элементами раздела (SectionItem)."""

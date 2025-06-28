@@ -98,9 +98,19 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
                      )
                  )
              )
-             show_learned = get_user_show_learned_setting(user)
-             if not show_learned:
+             # Проверяем параметр запроса include_learned
+             include_learned = self.request.query_params.get('include_learned', '').lower()
+             if include_learned in ['true', '1', 'yes']:
+                 # Показываем все записи (включая изученные)
+                 pass  
+             elif include_learned in ['false', '0', 'no']:
+                 # Скрываем изученные записи
                  queryset = queryset.filter(user_has_learned=False)
+             else:
+                 # Используем настройку пользователя по умолчанию
+                 show_learned = get_user_show_learned_setting(user)
+                 if not show_learned:
+                     queryset = queryset.filter(user_has_learned=False)
 
         return queryset
 
@@ -170,6 +180,47 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
             return Response({"status": "изучение отменено"}, status=status.HTTP_200_OK)
         else:
             return Response({"status": "запись не была отмечена как изученная"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, CanViewDictionaryContent])
+    def meta(self, request, section_pk=None):
+        """Получить метаданные о записях словаря (общее количество, количество изученных и т.д.)."""
+        section_pk = self.kwargs.get('section_pk')
+        user = request.user
+
+        if not section_pk:
+            return Response({"error": "section_pk is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        section = get_object_or_404(
+            DictionarySection.objects.select_related('course'),
+            pk=section_pk
+        )
+        
+        if not CanViewDictionaryContent().has_object_permission(self.request, self, section):
+            self.permission_denied(self.request, message="Нет доступа к этому разделу словаря.")
+
+        # Получаем queryset с теми же фильтрами что и в get_queryset
+        base_queryset = DictionaryEntry.objects.filter(section=section)
+        
+        total_count = base_queryset.count()
+        learned_count = 0
+        unlearned_count = total_count
+        
+        if user.is_authenticated:
+            learned_entries = UserLearnedEntry.objects.filter(
+                user=user,
+                entry__section=section
+            ).values_list('entry_id', flat=True)
+            
+            learned_count = len(learned_entries)
+            unlearned_count = total_count - learned_count
+
+        return Response({
+            "total_count": total_count,
+            "learned_count": learned_count,
+            "unlearned_count": unlearned_count,
+            "section_id": section.id,
+            "section_title": section.title
+        })
 
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):

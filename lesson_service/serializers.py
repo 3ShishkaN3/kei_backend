@@ -1,7 +1,7 @@
+import json
 from rest_framework import serializers
 from .models import Lesson, Section, SectionCompletion, LessonCompletion, SectionItem
 from auth_service.serializers import UserSerializer
-from django.contrib.contenttypes.models import ContentType
 from material_service.serializers import (
     TextMaterialSerializer, ImageMaterialSerializer, AudioMaterialSerializer,
     VideoMaterialSerializer, DocumentMaterialSerializer, TestSerializer
@@ -20,108 +20,180 @@ CONTENT_TYPE_MAP = {
 }
 
 class SectionItemSerializer(serializers.ModelSerializer):
-    """Сериализатор для элемента раздела, с динамической обработкой контента."""
-    # Поле для чтения деталей контента
     content_details = serializers.SerializerMethodField(read_only=True)
-    # Поле для записи данных нового контента (write_only)
     content_data = serializers.JSONField(write_only=True, required=False, allow_null=True,
-                                         help_text="JSON объект с данными для создания нового контента (текста, теста и т.д.)")
-    # Поля для связи с существующим контентом (write_only)
+                                         help_text="JSON-объект с данными для создания нового контента (текста, теста и т.д.) или метаданные для файлов.")
     existing_content_type = serializers.CharField(write_only=True, required=False, allow_null=True, help_text="Тип существующего контента (напр., 'text', 'test')")
     existing_content_id = serializers.IntegerField(write_only=True, required=False, allow_null=True, help_text="ID существующего контента")
-
 
     class Meta:
         model = SectionItem
         fields = [
             'id', 'section', 'order', 'item_type',
-            'content_details', # Для чтения
-            'content_data', 'existing_content_type', 'existing_content_id', # Для записи
+            'content_details',
+            'content_data', 'existing_content_type', 'existing_content_id',
             'created_at', 'updated_at',
-            # Скрываем поля GenericForeignKey из прямого доступа API
-            # 'content_type', 'object_id',
         ]
-        read_only_fields = ('section', 'created_at', 'updated_at') # section устанавливается во ViewSet
+        read_only_fields = ('section', 'created_at', 'updated_at')
         extra_kwargs = {
-             # Убедимся, что item_type обязателен при создании
             'item_type': {'required': True, 'allow_blank': False},
-             # order может быть не обязателен, установим во ViewSet
-            'order': {'required': False},
+            'order': {'required': False}, # Order будет вычисляться во ViewSet для создания
         }
 
     def get_content_details(self, obj):
-        """Динамически сериализует связанный контент."""
         content_object = obj.content_object
         if content_object:
             item_type = obj.item_type
             if item_type in CONTENT_TYPE_MAP:
                 serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
                 context = self.context
-                 # Добавляем 'request' в контекст, если его нет (важно для URL файлов)
-                if 'request' not in context:
-                    context['request'] = None # Или можно попытаться получить из self.root?
+                if 'request' not in context and hasattr(self, 'root') and hasattr(self.root, 'context'): # Попытка получить request из root
+                    context['request'] = self.root.context.get('request')
+                elif 'request' not in context:
+                     context['request'] = None
+
                 try:
                     return serializer_class(content_object, context=context).data
                 except Exception as e:
-                    print(f"Error serializing content for item {obj.id}: {e}")
-                    return None # Или вернуть индикатор ошибки
+                    # В реальном проекте здесь лучше использовать logging
+                    print(f"Error serializing content for item {obj.id} (type: {item_type}): {e}")
+                    return {"error": "Could not serialize content details."}
         return None
 
     def validate(self, attrs):
-        """Проверяем логику записи: либо content_data, либо existing_*, но не оба."""
-        content_data = attrs.get('content_data')
+        raw_initial_data = self.initial_data
+        # item_type берется из attrs, так как он 'required': True и должен быть там после базовой валидации
+        item_type = attrs['item_type']
+
+        is_update = self.instance is not None
+        
+        content_creation_data_from_json_field = None
+        files_for_material = {}
+
+        content_data_json_str = raw_initial_data.get('content_data')
+        if content_data_json_str:
+            if isinstance(content_data_json_str, str):
+                try:
+                    content_creation_data_from_json_field = json.loads(content_data_json_str)
+                except json.JSONDecodeError:
+                    raise serializers.ValidationError({'content_data': 'Некорректный JSON в поле content_data.'})
+            elif isinstance(content_data_json_str, dict):
+                 content_creation_data_from_json_field = content_data_json_str
+            else:
+                raise serializers.ValidationError({'content_data': 'Поле content_data должно быть JSON-строкой или объектом.'})
+        
+        request_files = self.context['request'].FILES if 'request' in self.context and hasattr(self.context['request'], 'FILES') else {}
+        for field_name, uploaded_file in request_files.items():
+            files_for_material[field_name] = uploaded_file
+            
+        final_material_data_payload = {}
+        if content_creation_data_from_json_field:
+            final_material_data_payload.update(content_creation_data_from_json_field)
+        final_material_data_payload.update(files_for_material) # Файлы перезапишут одноименные ключи из JSON, если есть
+
+        # existing_content_type и existing_content_id уже будут в attrs, если они были в запросе,
+        # так как они write_only=False (по умолчанию) или write_only=True, но required=False.
+        # Если они write_only=True и required=False, они могут быть None в attrs.
         existing_type = attrs.get('existing_content_type')
         existing_id = attrs.get('existing_content_id')
-        item_type = attrs.get('item_type') # item_type должен быть всегда
 
-        # При обновлении (self.instance существует) можно не передавать контент
-        is_update = self.instance is not None
-        if is_update and not content_data and not existing_type and not existing_id:
-             # Если обновляется только order, например
-            return attrs
+        if is_update and not final_material_data_payload and not (existing_type and existing_id):
+            return attrs # Обновляем только order или ничего специфичного для контента
 
-        # Проверка item_type
         if item_type not in CONTENT_TYPE_MAP:
             raise serializers.ValidationError({"item_type": f"Недопустимый тип элемента: {item_type}"})
 
-        if content_data and (existing_type or existing_id):
-            raise serializers.ValidationError("Укажите либо 'content_data' для создания нового контента, либо 'existing_content_type' и 'existing_content_id' для связи с существующим, но не оба.")
+        has_new_content_data = bool(final_material_data_payload)
+        has_existing_link_data = bool(existing_type and existing_id)
 
-        if not content_data and not (existing_type and existing_id):
-            # При создании (not is_update) контент обязателен
+        if has_new_content_data and has_existing_link_data:
+            raise serializers.ValidationError("Укажите либо данные для нового контента, либо ссылку на существующий, но не оба.")
+
+        if not has_new_content_data and not has_existing_link_data:
             if not is_update:
-                raise serializers.ValidationError("Необходимо указать либо 'content_data' для создания нового контента, либо 'existing_content_type' и 'existing_content_id' для связи с существующим.")
-
-        if existing_type or existing_id:
-             if not existing_type or not existing_id:
-                 raise serializers.ValidationError("Для связи с существующим контентом необходимо указать и 'existing_content_type', и 'existing_content_id'.")
+                raise serializers.ValidationError("Необходимо указать данные для нового контента или ссылку на существующий.")
+        
+        if has_existing_link_data:
+             if not existing_type or not existing_id: # Это условие избыточно, если has_existing_link_data уже true
+                 pass # Оставим для ясности, но проверка выше уже это покрывает
              if existing_type != item_type:
                  raise serializers.ValidationError({"existing_content_type": f"Тип существующего контента '{existing_type}' не совпадает с типом элемента '{item_type}'."})
-             # Проверяем существование объекта в material_service
-             if existing_type in CONTENT_TYPE_MAP:
-                 model_class = CONTENT_TYPE_MAP[existing_type]['model']
-                 if not model_class.objects.filter(pk=existing_id).exists():
-                     raise serializers.ValidationError({"existing_content_id": f"Контент типа '{existing_type}' с ID {existing_id} не найден."})
-             else: # На всякий случай
-                  raise serializers.ValidationError({"existing_content_type": "Неизвестный тип существующего контента."})
+             model_class = CONTENT_TYPE_MAP[existing_type]['model']
+             if not model_class.objects.filter(pk=existing_id).exists():
+                 raise serializers.ValidationError({"existing_content_id": f"Контент типа '{existing_type}' с ID {existing_id} не найден."})
 
-        if content_data:
-            # Валидируем content_data с помощью соответствующего сериализатора
-             if item_type in CONTENT_TYPE_MAP:
-                 serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
-                 # Передаем данные для валидации
-                 content_serializer = serializer_class(data=content_data, context=self.context)
-                 try:
-                     content_serializer.is_valid(raise_exception=True)
-                     # Сохраняем валидированные данные обратно для использования в perform_create/update
-                     attrs['validated_content_data'] = content_serializer.validated_data
-                 except serializers.ValidationError as e:
-                      # Перехватываем ошибку валидации контента и поднимаем ее как ошибку поля content_data
-                     raise serializers.ValidationError({'content_data': e.detail})
-             else: # На всякий случай
-                 raise serializers.ValidationError({"item_type": "Не удается найти сериализатор для валидации content_data."})
-
+        if has_new_content_data:
+            material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
+            material_serializer_instance = material_serializer_class(data=final_material_data_payload, context=self.context)
+            try:
+                material_serializer_instance.is_valid(raise_exception=True)
+                # Сохраняем валидированные данные материала для использования в create/update
+                attrs['validated_material_data'] = material_serializer_instance.validated_data 
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({'content_material_data': e.detail})
+        
+        # Удаляем исходное поле 'content_data' из attrs, так как оно было write_only
+        # и мы его уже обработали. Это предотвратит его передачу в self.create или self.update.
+        # Поля existing_content_type и existing_content_id также write_only, DRF должен сам их убрать
+        # из validated_data перед вызовом create/update, если они не являются полями модели.
+        attrs.pop('content_data', None)
+        attrs.pop('existing_content_type', None)
+        attrs.pop('existing_content_id', None)
+        
         return attrs
+
+    def create(self, validated_data):
+        # validated_data здесь уже содержит:
+        # - section (из perform_create -> save)
+        # - order (из perform_create -> save)
+        # - item_type (из запроса)
+        # - content_type (ContentType инстанс, из perform_create -> save)
+        # - object_id (PK материала, из perform_create -> save)
+        # - И НЕ должно содержать 'validated_material_data', 'content_data', 'existing_*'
+        
+        # 'validated_material_data' мы добавили в attrs в validate, его нужно извлечь,
+        # оно не является полем SectionItem.
+        validated_data.pop('validated_material_data', None) 
+        
+        # Поля content_data, existing_content_type, existing_content_id
+        # уже должны были быть удалены в `validate` или отфильтрованы DRF, так как они write_only.
+        # На всякий случай, если они как-то просочились:
+        validated_data.pop('content_data', None)
+        validated_data.pop('existing_content_type', None)
+        validated_data.pop('existing_content_id', None)
+
+        try:
+            section_item = SectionItem.objects.create(**validated_data)
+        except Exception as e:
+            # Это место, где может возникнуть TypeError, если в validated_data все еще есть лишние ключи.
+            # Или IntegrityError, если UNIQUE constraint не был разрешен ранее.
+            # print(f"Error in SectionItemSerializer.create with validated_data: {validated_data}") # DEBUG
+            # print(f"Exception: {e}") # DEBUG
+            raise # Переподнимаем исключение, чтобы оно было обработано выше
+        return section_item
+
+    def update(self, instance, validated_data):
+        # Аналогично create, нужно очистить validated_data от 'validated_material_data'
+        validated_data.pop('validated_material_data', None)
+        validated_data.pop('content_data', None)
+        validated_data.pop('existing_content_type', None)
+        validated_data.pop('existing_content_id', None)
+        
+        # kwargs для instance.save() или SectionItem.objects.filter(pk=instance.pk).update(**kwargs)
+        # validated_data будет содержать 'order' (если пришел), 'item_type' (если пришел)
+        # content_type и object_id передаются через kwargs в perform_update -> save
+        
+        # Обновляем поля GenericForeignKey, если они переданы в validated_data из save()
+        instance.content_type = validated_data.get('content_type', instance.content_type)
+        instance.object_id = validated_data.get('object_id', instance.object_id)
+        
+        # Обновляем остальные поля
+        instance.item_type = validated_data.get('item_type', instance.item_type)
+        instance.order = validated_data.get('order', instance.order)
+        # section обычно не меняется при обновлении элемента
+        
+        instance.save()
+        return instance
 
 class SectionSerializer(serializers.ModelSerializer):
     """Сериализатор для разделов урока."""

@@ -1,11 +1,20 @@
 from kafka import KafkaProducer
 import json
+from decouple import config, Csv
 
-producer = KafkaProducer(
-    bootstrap_servers=['localhost:9092'],
-    value_serializer=lambda x: json.dumps(x).encode('utf-8')
-)
+producer = None
+
+def get_producer():
+    global producer
+    if producer is None:
+        producer = KafkaProducer(
+            bootstrap_servers=config('KAFKA_BOOTSTRAP_SERVERS', default='localhost:9092', cast=Csv()),
+            value_serializer=lambda x: json.dumps(x).encode('utf-8')
+        )
+    return producer
+
 
 def send_to_kafka(topic, data):
-    producer.send(topic, value=data)
-    producer.flush()
+    kafka_producer = get_producer()
+    kafka_producer.send(topic, value=data)
+    kafka_producer.flush()

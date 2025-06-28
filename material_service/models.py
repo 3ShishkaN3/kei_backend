@@ -40,6 +40,10 @@ class ImageMaterial(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @classmethod
+    def get_file_field_name(cls):
+        return 'image'
+
     class Meta:
         verbose_name = "Изображение"
         verbose_name_plural = "Изображения"
@@ -63,6 +67,10 @@ class AudioMaterial(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get_file_field_name(cls):
+        return 'audio_file'
 
     class Meta:
         verbose_name = "Аудио материал"
@@ -137,13 +145,12 @@ class DocumentMaterial(models.Model):
 
 
 class Test(models.Model):
-    """Базовая модель для теста любого типа."""
     TEST_TYPE_CHOICES = (
         ('mcq-multi', 'Выбор нескольких ответов'),
         ('mcq-single', 'Выбор одного ответа'),
         ('free-text', 'Текстовый ответ'),
-        ('word-order', 'Правильный порядок слов'),
-        ('matching', 'Соотнесение'),
+        ('word-order', 'Правильный порядок слов (в строке)'), # Старый word-order для предложений
+        ('drag-and-drop', 'Перетаскивание элементов (облачка и ячейки)'), # Новый тип
         ('pronunciation', 'Проверка произношения'),
         ('spelling', 'Проверка правописания'),
     )
@@ -153,13 +160,15 @@ class Test(models.Model):
 
     attached_image = models.ForeignKey(
         ImageMaterial, null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='tests_using_image', verbose_name="Прикрепленное изображение"
+        related_name='tests_using_image', verbose_name="Прикрепленное изображение к тесту (общее)"
     )
     attached_audio = models.ForeignKey(
         AudioMaterial, null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='tests_using_audio', verbose_name="Прикрепленное аудио"
+        related_name='tests_using_audio', verbose_name="Прикрепленное аудио к тесту (общее)"
     )
-
+    
+    draggable_options_pool = models.JSONField(default=list, blank=True, verbose_name="Набор всех облачков (вариантов)")
+    
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name='created_tests',
@@ -221,82 +230,65 @@ class FreeTextQuestion(models.Model):
 
 
 class WordOrderSentence(models.Model):
-    """Данные для теста на порядок слов."""
     test = models.OneToOneField( 
         Test,
         on_delete=models.CASCADE,
-        related_name='word_order_sentence',
-        limit_choices_to={'test_type': 'word-order'},
-        verbose_name="Тест на порядок слов"
+        related_name='word_order_sentence_details',
+        limit_choices_to={'test_type': 'word_order'},
+        verbose_name="Задание на порядок слов"
+    )
+    correct_ordered_texts = models.JSONField(
+        default=list, 
+        verbose_name="Тексты в правильном порядке (из пула облачков)"
+    )
+    display_prompt = models.CharField(
+        max_length=500, blank=True, 
+        verbose_name="Подсказка/Начало предложения (необязательно)"
+    )
+    explanation = models.TextField(
+        blank=True, null=True, 
+        verbose_name="Пояснение к заданию"
     )
 
-    correct_order_words = models.JSONField(default=list, verbose_name="Слова в правильном порядке")
-    distractor_words = models.JSONField(default=list, blank=True, verbose_name="Лишние слова (distractors)")
-    display_prompt = models.CharField(max_length=500, blank=True, verbose_name="Подсказка/Начало предложения (необязательно)")
-    explanation = models.TextField(blank=True, null=True, verbose_name="Пояснение к этой паре")
-
     class Meta:
-        verbose_name = "Предложение для теста на порядок слов"
-        verbose_name_plural = "Предложения для тестов на порядок слов"
+        verbose_name = "Задание на порядок слов (из пула)"
+        verbose_name_plural = "Задания на порядок слов (из пула)"
 
     def __str__(self):
         return f"Порядок слов для '{self.test.title}'"
 
-
-class MatchingPair(models.Model):
-    """Одна пара для соотнесения в тесте."""
+class MatchingPair(models.Model): # Теперь это "Ячейка/Слот" для drag-and-drop теста
     test = models.ForeignKey(
         Test,
         on_delete=models.CASCADE,
-        related_name='matching_pairs',
-        limit_choices_to={'test_type': 'matching'},
-        verbose_name="Тест на соотнесение"
+        related_name='drag_drop_slots', # Переименовали related_name для ясности
+        limit_choices_to={'test_type': 'drag-and-drop'}, # Только для нового типа теста
+        verbose_name="Тест (Перетаскивание)"
     )
-    prompt_text = models.CharField(max_length=500, blank=True, null=True, verbose_name="Текст для соотнесения")
+    # prompt_text, prompt_image, prompt_audio - это то, С ЧЕМ соотносим (задание для ячейки)
+    prompt_text = models.CharField(max_length=500, blank=True, null=True, verbose_name="Текст-задание для ячейки (если есть)")
     prompt_image = models.ForeignKey(
         ImageMaterial, null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='matching_prompts', verbose_name="Изображение для соотнесения"
+        related_name='drag_drop_slot_images', verbose_name="Изображение-задание для ячейки"
     )
     prompt_audio = models.ForeignKey(
         AudioMaterial, null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='matching_prompts', verbose_name="Аудио для соотнесения"
+        related_name='drag_drop_slot_audio', verbose_name="Аудио-задание для ячейки"
     )
-    correct_answer_text = models.CharField(max_length=500, verbose_name="Текст правильного 'облачка'")
-    order = models.PositiveIntegerField(default=0, verbose_name="Порядок отображения")
-    explanation = models.TextField(blank=True, null=True, verbose_name="Пояснение к этой паре")
+    
+    correct_answer_text = models.CharField(max_length=500, verbose_name="Текст правильного облачка для этой ячейки")
+    
+    order = models.PositiveIntegerField(default=0, verbose_name="Порядок отображения ячейки")
+    explanation = models.TextField(blank=True, null=True, verbose_name="Пояснение к этой ячейке/ответу")
 
     class Meta:
-        verbose_name = "Пара для соотнесения"
-        verbose_name_plural = "Пары для соотнесения"
+        verbose_name = "Ячейка для перетаскивания (слот)"
+        verbose_name_plural = "Ячейки для перетаскивания (слоты)"
         ordering = ['test', 'order']
 
-    def clean(self):
-        # Проверка, что указан только один тип prompt
-        prompts = [self.prompt_text, self.prompt_image, self.prompt_audio]
-        if sum(p is not None and p != '' for p in prompts) != 1:
-            raise ValidationError("Должен быть указан ровно один элемент для соотнесения (текст, изображение или аудио).")
 
     def __str__(self):
-        return f"Пара для '{self.test.title}' (Ответ: {self.correct_answer_text})"
-
-
-class MatchingDistractor(models.Model):
-    """Лишнее 'облачко' для теста на соотнесение."""
-    test = models.ForeignKey(
-        Test,
-        on_delete=models.CASCADE,
-        related_name='matching_distractors',
-        limit_choices_to={'test_type': 'matching'},
-        verbose_name="Тест на соотнесение"
-    )
-    distractor_text = models.CharField(max_length=500, verbose_name="Текст лишнего 'облачка'")
-
-    class Meta:
-        verbose_name = "Лишнее облачко (соотнесение)"
-        verbose_name_plural = "Лишние облачка (соотнесение)"
-
-    def __str__(self):
-        return f"Лишнее облачко для '{self.test.title}': {self.distractor_text}"
+        return f"Слот для '{self.test.title}' (Правильный ответ: {self.correct_answer_text})"
 
 
 class PronunciationQuestion(models.Model):
@@ -419,6 +411,17 @@ class WordOrderSubmissionAnswer(models.Model):
         verbose_name = "Ответ на порядок слов"
         verbose_name_plural = "Ответы на порядок слов"
 
+class DragDropSubmissionAnswer(models.Model):
+    """Ответ студента для одной ячейки в drag-and-drop тесте."""
+    submission = models.ForeignKey(TestSubmission, on_delete=models.CASCADE, related_name='drag_drop_answers')
+    slot = models.ForeignKey(MatchingPair, on_delete=models.CASCADE, verbose_name="Ячейка (слот)") # Связь с "ячейкой"
+    dropped_option_text = models.CharField(max_length=500, verbose_name="Текст перетащенного облачка")
+    is_correct = models.BooleanField(null=True, blank=True, verbose_name="Ответ правильный?") # Может быть установлено при пошаговой проверке
+
+    class Meta:
+        verbose_name = "Ответ на перетаскивание в ячейку"
+        verbose_name_plural = "Ответы на перетаскивание в ячейки"
+        unique_together = ('submission', 'slot') 
 
 class MatchingSubmissionAnswer(models.Model):
     """Отправленное соотнесение для одной пары."""

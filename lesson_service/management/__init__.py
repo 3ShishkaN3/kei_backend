@@ -1,0 +1,1 @@
+# This directory contains custom management commands for lesson_service 

@@ -11,3 +11,7 @@ __pycache__
 *.dir
 media/*
 *mypy_cache/
+.trunk/
+logs/*
+media/*
+to_migrate/*

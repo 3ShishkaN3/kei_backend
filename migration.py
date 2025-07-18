@@ -16,6 +16,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from auth_service.models import User
 from user_service.models import UserProfile, UserSettings
+from course_service.models import Course, CourseEnrollment, CourseTeacher
 
 # --- НАСТРОЙКИ ---
 # Старая база данных SQLite
@@ -241,6 +242,95 @@ def migrate_user_service(sqlite_conn):
     print("\nМиграция user_service завершена.")
 
 
+def migrate_course_service(sqlite_conn):
+    """Мигрирует данные для Course, CourseEnrollment и CourseTeacher."""
+    print("\nНачинаю миграцию course_service...")
+    sqlite_cursor = sqlite_conn.cursor()
+
+    # Пути к медиа-папкам внутри контейнера
+    OLD_MEDIA_ROOT = 'to_migrate/media'
+    NEW_MEDIA_ROOT = 'media'
+
+    # 1. Миграция основных данных курсов
+    print("Мигрирую курсы...")
+    # Ищем автора по умолчанию (первый админ или учитель)
+    default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
+    
+    status_mapping = {
+        'Открыт': 'published',
+        'Закрыт': 'draft',
+    }
+
+    sqlite_cursor.execute("SELECT * FROM kei_school_course")
+    old_courses = sqlite_cursor.fetchall()
+    for course_data in old_courses:
+        # --- Миграция изображения курса ---
+        old_image_path = course_data['image']
+        new_image_db_path = None
+        if old_image_path:
+            source_path = os.path.join(OLD_MEDIA_ROOT, old_image_path)
+            dest_path = os.path.join(NEW_MEDIA_ROOT, old_image_path)
+            if os.path.exists(source_path):
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                shutil.copy2(source_path, dest_path)
+                new_image_db_path = old_image_path
+                print(f"Скопировано изображение для курса '{course_data['name']}'.")
+            else:
+                print(f"Файл изображения не найден: {source_path}")
+        # --- Конец миграции изображения ---
+
+        new_status = status_mapping.get(course_data['status'], 'draft')
+
+        course, created = Course.objects.update_or_create(
+            id=course_data['id'],
+            defaults={
+                'title': course_data['name'],
+                'subtitle': course_data['short_description'],
+                'description': course_data['description'],
+                'status': new_status,
+                'cover_image': new_image_db_path,
+                'created_by': default_author
+            }
+        )
+        if created:
+            print(f"Курс '{course.title}' создан.")
+        else:
+            print(f"Курс '{course.title}' обновлен.")
+
+    # 2. Миграция связей пользователей с курсами
+    print("\nМигрирую связи пользователей с курсами...")
+    sqlite_cursor.execute("SELECT * FROM kei_school_usercourse")
+    old_enrollments = sqlite_cursor.fetchall()
+    for enroll_data in old_enrollments:
+        try:
+            user = User.objects.get(id=enroll_data['user_id'])
+            course = Course.objects.get(id=enroll_data['course_id'])
+
+            # Создаем CourseEnrollment для всех
+            enrollment, created = CourseEnrollment.objects.get_or_create(
+                student=user,
+                course=course
+            )
+            if created:
+                print(f"Пользователь '{user.username}' записан на курс '{course.title}'.")
+            
+            # Если пользователь - учитель или админ, делаем его CourseTeacher
+            if user.role in [User.Role.TEACHER, User.Role.ADMIN]:
+                teacher, created = CourseTeacher.objects.get_or_create(
+                    teacher=user,
+                    course=course,
+                )
+                if created:
+                     print(f"Пользователь '{user.username}' назначен преподавателем на курс '{course.title}'.")
+
+        except User.DoesNotExist:
+            print(f"Пользователь с id={enroll_data['user_id']} не найден. Пропускаю запись на курс.")
+        except Course.DoesNotExist:
+            print(f"Курс с id={enroll_data['course_id']} не найден. Пропускаю запись.")
+
+    print("\nМиграция course_service завершена.")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -249,6 +339,7 @@ if __name__ == '__main__':
         migrate_users(sqlite_conn)
         migrate_groups_and_permissions(sqlite_conn)
         migrate_user_service(sqlite_conn)
+        migrate_course_service(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()

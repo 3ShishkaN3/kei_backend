@@ -1,6 +1,6 @@
 # Ignore logs, media, and migration helpers
 logs/
-media/
+.trash/
 to_migrate/
 
 # Python bytecode and caches
@@ -22,4 +22,16 @@ __pycache__/
 *.log
 
 # MacOS
-.DS_Store 
+.DS_Store
+
+.mypy_cache/
+.vscode/
+.trunk/
+.trash/
+to_migrate/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd

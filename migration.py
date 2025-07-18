@@ -3,6 +3,7 @@ import sys
 import psycopg2
 import sqlite3
 import django
+import shutil
 
 # Добавляем корневую директорию проекта в PYTHONPATH
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kei_backend'))
@@ -14,6 +15,7 @@ django.setup()
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from auth_service.models import User
+from user_service.models import UserProfile, UserSettings
 
 # --- НАСТРОЙКИ ---
 # Старая база данных SQLite
@@ -56,8 +58,8 @@ def get_postgres_connection():
         return None
 
 def migrate_users(sqlite_conn):
-    """Мигрирует пользователей из SQLite в PostgreSQL, исправляя username."""
-    print("\nНачинаю миграцию/обновление пользователей...")
+    """Мигрирует пользователей из SQLite в PostgreSQL, исправляя username и роли."""
+    print("\nНачинаю миграцию/обновление пользователей (username и роли)...")
     sqlite_cursor = sqlite_conn.cursor()
     # Объединяем с userinfo, чтобы получить nickname
     sqlite_cursor.execute("""
@@ -75,7 +77,6 @@ def migrate_users(sqlite_conn):
     
     for old_user_data in old_users:
         try:
-            # Ищем пользователя в новой БД по email, так как он должен быть уникальным
             user_to_update = User.objects.filter(email__iexact=old_user_data['email']).first()
             
             if not user_to_update:
@@ -83,30 +84,52 @@ def migrate_users(sqlite_conn):
                 skipped_count += 1
                 continue
 
+            # --- Логика определения роли ---
+            if old_user_data['is_superuser']:
+                new_role = User.Role.ADMIN
+            elif old_user_data['is_staff']:
+                new_role = User.Role.TEACHER
+            else:
+                new_role = User.Role.STUDENT
+            # --- Конец логики ---
+
             new_username = old_user_data['nickname'] if old_user_data['nickname'] else old_user_data['old_username']
+            
+            username_changed = user_to_update.username != new_username
+            role_changed = user_to_update.role != new_role
 
-            if user_to_update.username == new_username:
-                print(f"Username для {user_to_update.email} уже корректен ('{new_username}'). Пропускаю.")
+            if not username_changed and not role_changed:
+                print(f"Данные для {user_to_update.email} уже корректны. Пропускаю.")
                 skipped_count += 1
                 continue
+            
+            fields_to_update = []
+            if username_changed:
+                # Проверяем на конфликт username перед сохранением
+                if User.objects.filter(username__iexact=new_username).exclude(pk=user_to_update.pk).exists():
+                    print(f"Новый username '{new_username}' для пользователя {user_to_update.email} уже занят. Пропускаю обновление username.")
+                else:
+                    print(f"Обновляю username для {user_to_update.email}: '{user_to_update.username}' -> '{new_username}'")
+                    user_to_update.username = new_username
+                    fields_to_update.append('username')
 
-            # Проверяем на конфликт username перед сохранением
-            if User.objects.filter(username__iexact=new_username).exclude(pk=user_to_update.pk).exists():
-                print(f"Новый username '{new_username}' для пользователя {user_to_update.email} уже занят другим пользователем. Пропускаю.")
+            if role_changed:
+                print(f"Обновляю роль для {user_to_update.email}: '{user_to_update.role}' -> '{new_role}'")
+                user_to_update.role = new_role
+                fields_to_update.append('role')
+
+            if fields_to_update:
+                user_to_update.save(update_fields=fields_to_update)
+                updated_count += 1
+            else:
                 skipped_count += 1
-                continue
-
-            print(f"Обновляю username для {user_to_update.email}: '{user_to_update.username}' -> '{new_username}'")
-            user_to_update.username = new_username
-            user_to_update.save(update_fields=['username'])
-            updated_count += 1
             
         except Exception as e:
             print(f"Ошибка при обновлении пользователя с email {old_user_data.get('email', 'N/A')}: {e}")
             skipped_count += 1
 
     print(f"\nОбновление пользователей завершено.")
-    print(f"Обновлено: {updated_count}")
+    print(f"Обновлено записей: {updated_count}")
     print(f"Пропущено: {skipped_count}")
 
 
@@ -143,6 +166,81 @@ def migrate_groups_and_permissions(sqlite_conn):
             print(f"Группа с id={user_group['group_id']} не найдена. Пропускаю связь.")
 
 
+def migrate_user_service(sqlite_conn):
+    """Мигрирует данные для UserProfile и UserSettings, включая аватары."""
+    print("\nНачинаю миграцию user_service...")
+    sqlite_cursor = sqlite_conn.cursor()
+
+    # Пути к медиа-папкам внутри контейнера
+    OLD_MEDIA_ROOT = 'to_migrate/media'
+    NEW_MEDIA_ROOT = 'media'
+
+    # Миграция UserProfile из старой UserInfo
+    print("Мигрирую UserProfile (включая аватары)...")
+    sqlite_cursor.execute("SELECT * FROM kei_school_userinfo")
+    old_user_infos = sqlite_cursor.fetchall()
+    for info in old_user_infos:
+        try:
+            user = User.objects.get(id=info['user_id'])
+            
+            # --- Миграция файла аватара ---
+            old_avatar_relative_path = info['avatar']
+            new_avatar_db_path = None  # Путь для записи в БД по умолчанию
+
+            if old_avatar_relative_path:
+                source_path = os.path.join(OLD_MEDIA_ROOT, old_avatar_relative_path)
+                dest_path = os.path.join(NEW_MEDIA_ROOT, old_avatar_relative_path)
+                
+                if os.path.exists(source_path):
+                    # Убедимся, что директория для нового файла существует
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    shutil.copy2(source_path, dest_path)  # copy2 сохраняет метаданные
+                    new_avatar_db_path = old_avatar_relative_path  # Путь в БД - относительный
+                    print(f"Скопирован аватар для '{user.username}'.")
+                else:
+                    print(f"Файл аватара не найден: {source_path}")
+            # --- Конец миграции файла ---
+
+            # Используем update_or_create для идемпотентного создания/обновления
+            profile, created = UserProfile.objects.update_or_create(
+                user=user,
+                defaults={
+                    'phone_number': info['phone_number'],
+                    'avatar': new_avatar_db_path
+                }
+            )
+            
+            if created:
+                print(f"Создан профиль для пользователя '{user.username}'.")
+            else:
+                print(f"Обновлен профиль для пользователя '{user.username}'.")
+
+        except User.DoesNotExist:
+            print(f"Пользователь с id={info['user_id']} не найден. Пропускаю профиль.")
+
+    # Миграция UserSettings (логика остается прежней)
+    print("\nМигрирую UserSettings...")
+    sqlite_cursor.execute("SELECT * FROM kei_school_usersettings")
+    old_user_settings = sqlite_cursor.fetchall()
+    for setting in old_user_settings:
+        try:
+            user = User.objects.get(id=setting['user_id'])
+            user_settings, created = UserSettings.objects.update_or_create(
+                user=user,
+                defaults={'show_learned_items': setting['show_completed_answers']}
+            )
+            if created:
+                print(f"Созданы настройки для пользователя '{user.username}'.")
+            else:
+                user_settings.show_learned_items = setting['show_completed_answers']
+                user_settings.save()
+                print(f"Обновлены настройки для пользователя '{user.username}'.")
+        except User.DoesNotExist:
+            print(f"Пользователь с id={setting['user_id']} не найден. Пропускаю настройки.")
+
+    print("\nМиграция user_service завершена.")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -150,6 +248,7 @@ if __name__ == '__main__':
     if sqlite_conn and postgres_conn:
         migrate_users(sqlite_conn)
         migrate_groups_and_permissions(sqlite_conn)
+        migrate_user_service(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()

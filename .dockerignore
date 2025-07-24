@@ -2,6 +2,10 @@
 logs/
 .trash/
 to_migrate/
+.git
+.mypy_cache/
+.vscode/
+.trunk/
 
 # Python bytecode and caches
 __pycache__/
@@ -24,10 +28,14 @@ __pycache__/
 # MacOS
 .DS_Store
 
-.mypy_cache/
-.vscode/
-.trunk/
-.trash/
+*.mypy_cache/
+*.vscode/
+*.trunk/
+*.trash/
+*/.mypy_cache/
+*/.vscode/
+*/.trunk/
+*/.trash/
 to_migrate/
 
 # Python bytecode and caches

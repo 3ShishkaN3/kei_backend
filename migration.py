@@ -814,6 +814,366 @@ def migrate_material_service(sqlite_conn):
     print(f"Изображений: {counts['images']}, Аудио: {counts['audio']}, Видео: {counts['videos']}, Документов: {counts['docs']}, Пропущено: {counts['skipped']}")
 
 
+def migrate_tests(sqlite_conn):
+    """Мигрирует тесты из старой БД в новую структуру."""
+    print("\nНачинаю миграцию тестов...")
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    from material_service.models import (
+        Test, MCQOption, FreeTextQuestion, WordOrderSentence, 
+        MatchingPair, TestSubmission, MCQSubmissionAnswer, 
+        FreeTextSubmissionAnswer, WordOrderSubmissionAnswer, 
+        DragDropSubmissionAnswer
+    )
+    from lesson_service.models import Section, SectionItem
+    from django.contrib.contenttypes.models import ContentType
+    
+    # Пути к медиа-папкам
+    OLD_MEDIA_ROOT = 'to_migrate/media'
+    NEW_MEDIA_ROOT = 'media'
+    default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
+    
+    # Словарь для маппинга старых путей к новым материалам
+    old_to_material_map = {}
+    
+    # Сначала создаем маппинг материалов (если еще не создан)
+    print("Создаю маппинг материалов для тестов...")
+    for root, dirs, files in os.walk(OLD_MEDIA_ROOT):
+        for fname in files:
+            old_path = os.path.join(root, fname)
+            old_rel_path = os.path.relpath(old_path, OLD_MEDIA_ROOT)
+            
+            # Ищем материал в БД
+            try:
+                if fname.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp')):
+                    material = ImageMaterial.objects.filter(image__endswith=fname).first()
+                elif fname.lower().endswith(('.mp3', '.wav', '.ogg', '.m4a')):
+                    material = AudioMaterial.objects.filter(audio_file__endswith=fname).first()
+                else:
+                    continue
+                    
+                if material:
+                    old_to_material_map[old_rel_path] = material
+            except Exception as e:
+                print(f"Ошибка при поиске материала {fname}: {e}")
+    
+    # Маппинг типов тестов
+    type_mapping = {
+        'choice_test': 'mcq-single',  # Будем проверять количество правильных ответов
+        'text_test': 'free-text',
+        'order_test': 'word-order',
+        'correlation_test': 'drag-and-drop'
+    }
+    
+    # Получаем все тесты из старой БД
+    sqlite_cursor.execute("""
+        SELECT 
+            tt.id as testtype_id,
+            tt.type,
+            tt.ask,
+            tt.test_id,
+            tt.image,
+            tt.audio,
+            t.lesson_id,
+            t.name as test_name
+        FROM kei_school_testtype tt
+        JOIN kei_school_test t ON tt.test_id = t.id
+        ORDER BY t.lesson_id, tt.id
+    """)
+    old_tests = sqlite_cursor.fetchall()
+    
+    test_counts = {'mcq-single': 0, 'mcq-multi': 0, 'free-text': 0, 'word-order': 0, 'drag-and-drop': 0}
+    
+    for test_data in old_tests:
+        testtype_id, old_type, question, test_id, image_path, audio_path, lesson_id, test_name = test_data
+        
+        try:
+            # Находим соответствующий раздел
+            section = Section.objects.get(lesson_id=lesson_id, order=test_id)
+        except Section.DoesNotExist:
+            print(f"Раздел для теста {testtype_id} (lesson_id={lesson_id}, test_id={test_id}) не найден. Пропускаю.")
+            continue
+        
+        # Определяем новый тип теста
+        new_type = type_mapping.get(old_type)
+        if not new_type:
+            print(f"Неизвестный тип теста: {old_type}. Пропускаю тест {testtype_id}.")
+            continue
+        
+        # Обрабатываем медиа файлы
+        attached_image = None
+        attached_audio = None
+        
+        if image_path:
+            if image_path in old_to_material_map:
+                attached_image = old_to_material_map[image_path]
+            else:
+                print(f"Изображение {image_path} не найдено в материалах.")
+        
+        if audio_path:
+            if audio_path in old_to_material_map:
+                attached_audio = old_to_material_map[audio_path]
+            else:
+                print(f"Аудио {audio_path} не найдено в материалах.")
+        
+        # Создаем тест
+        title = question[:250] if question else f"Тест {testtype_id}"
+        test = Test.objects.create(
+            title=title,
+            description='',
+            test_type=new_type,
+            attached_image=attached_image,
+            attached_audio=attached_audio,
+            created_by=default_author
+        )
+        
+        # Создаем специфичные данные в зависимости от типа теста
+        if old_type == 'choice_test':
+            # Получаем варианты ответов
+            sqlite_cursor.execute("""
+                SELECT 
+                    a.id as answer_id,
+                    a.is_correct,
+                    a.explanation,
+                    ac.choice_answer
+                FROM kei_school_answer a
+                JOIN kei_school_answerchoice ac ON ac.answer_id = a.id
+                WHERE a.test_id = ?
+                ORDER BY a.id
+            """, (testtype_id,))
+            
+            choices = sqlite_cursor.fetchall()
+            correct_count = sum(1 for choice in choices if choice[1])  # choice[1] - is_correct
+            
+            # Если больше одного правильного ответа, меняем тип на множественный выбор
+            if correct_count > 1:
+                test.test_type = 'mcq-multi'
+                test.save()
+                test_counts['mcq-multi'] += 1
+            else:
+                test_counts['mcq-single'] += 1
+            
+            # Создаем варианты ответов
+            for i, choice in enumerate(choices):
+                MCQOption.objects.create(
+                    test=test,
+                    text=choice[3] or f'Вариант {i+1}',  # choice_answer
+                    is_correct=bool(choice[1]),  # is_correct
+                    explanation=choice[2] or '',  # explanation
+                    order=i + 1
+                )
+            
+            print(f"Создан MCQ тест '{title}' с {len(choices)} вариантами ответов.")
+            
+        elif old_type == 'text_test':
+            # Получаем текстовый ответ
+            sqlite_cursor.execute("""
+                SELECT 
+                    a.explanation,
+                    at.text_answer
+                FROM kei_school_answer a
+                JOIN kei_school_answertext at ON at.answer_id = a.id
+                WHERE a.test_id = ?
+                LIMIT 1
+            """, (testtype_id,))
+            
+            text_answer = sqlite_cursor.fetchone()
+            if text_answer:
+                FreeTextQuestion.objects.create(
+                    test=test,
+                    reference_answer=text_answer[1] or '',  # text_answer
+                    explanation=text_answer[0] or ''  # explanation
+                )
+            
+            test_counts['free-text'] += 1
+            print(f"Создан текстовый тест '{title}'.")
+            
+        elif old_type == 'order_test':
+            # Получаем правильный порядок слов
+            sqlite_cursor.execute("""
+                SELECT 
+                    a.explanation,
+                    ao.order_answer
+                FROM kei_school_answer a
+                JOIN kei_school_answerorder ao ON ao.answer_id = a.id
+                WHERE a.test_id = ?
+                ORDER BY a.id
+            """, (testtype_id,))
+            
+            order_answers = sqlite_cursor.fetchall()
+            correct_order = [answer[1] for answer in order_answers if answer[1]]  # order_answer
+            
+            if correct_order:
+                # Создаем пул всех вариантов для drag-and-drop
+                all_options = list(set(correct_order))  # Убираем дубликаты
+                test.draggable_options_pool = all_options
+                test.save()
+                
+                WordOrderSentence.objects.create(
+                    test=test,
+                    correct_ordered_texts=correct_order,
+                    display_prompt='',
+                    explanation=order_answers[0][0] or ''  # explanation из первого ответа
+                )
+            
+            test_counts['word-order'] += 1
+            print(f"Создан тест на порядок слов '{title}' с {len(correct_order)} элементами.")
+            
+        elif old_type == 'correlation_test':
+            # Получаем пары для соотнесения
+            sqlite_cursor.execute("""
+                SELECT 
+                    a.id as answer_id,
+                    a.is_correct,
+                    a.explanation,
+                    ac.correlation_answer,
+                    am.photo
+                FROM kei_school_answer a
+                JOIN kei_school_answercorrelation ac ON ac.answer_id = a.id
+                LEFT JOIN kei_school_answermedia am ON am.answer_id = a.id
+                WHERE a.test_id = ?
+                ORDER BY a.id
+            """, (testtype_id,))
+            
+            correlations = sqlite_cursor.fetchall()
+            
+            # Создаем пул всех вариантов
+            all_options = list(set(corr[3] for corr in correlations if corr[3]))  # correlation_answer
+            test.draggable_options_pool = all_options
+            test.save()
+            
+            # Создаем слоты (ячейки) для drag-and-drop
+            for i, corr in enumerate(correlations):
+                prompt_image = None
+                if corr[4]:  # photo
+                    if corr[4] in old_to_material_map:
+                        prompt_image = old_to_material_map[corr[4]]
+                
+                MatchingPair.objects.create(
+                    test=test,
+                    prompt_text='',  # В старой БД нет текстового промпта
+                    prompt_image=prompt_image,
+                    prompt_audio=None,
+                    correct_answer_text=corr[3] or '',  # correlation_answer
+                    order=i + 1,
+                    explanation=corr[2] or ''  # explanation
+                )
+            
+            test_counts['drag-and-drop'] += 1
+            print(f"Создан тест на соотнесение '{title}' с {len(correlations)} парами.")
+        
+        # Привязываем тест к разделу
+        content_type = ContentType.objects.get_for_model(Test)
+        item_order = section.items.count() + 1
+        SectionItem.objects.create(
+            section=section,
+            order=item_order,
+            item_type='test',
+            content_type=content_type,
+            object_id=test.id
+        )
+    
+    print(f"\nМиграция тестов завершена.")
+    print(f"Создано тестов:")
+    for test_type, count in test_counts.items():
+        print(f"  {test_type}: {count}")
+
+
+def migrate_test_submissions(sqlite_conn):
+    """Мигрирует ответы пользователей на тесты."""
+    print("\nНачинаю миграцию ответов пользователей на тесты...")
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    from material_service.models import (
+        Test, TestSubmission, MCQSubmissionAnswer, 
+        FreeTextSubmissionAnswer, WordOrderSubmissionAnswer, 
+        DragDropSubmissionAnswer
+    )
+    
+    # Получаем все ответы пользователей
+    sqlite_cursor.execute("""
+        SELECT 
+            ua.id,
+            ua.is_complete,
+            ua.test_id,
+            ua.user_id,
+            ua.text,
+            tt.type as test_type,
+            tt.id as testtype_id
+        FROM kei_school_useranswers ua
+        JOIN kei_school_testtype tt ON ua.test_id = tt.id
+        WHERE ua.is_complete = 1
+    """)
+    
+    user_answers = sqlite_cursor.fetchall()
+    submission_count = 0
+    
+    for ua in user_answers:
+        ua_id, is_complete, testtype_id, user_id, text, test_type, testtype_id = ua
+        
+        try:
+            # Находим пользователя
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            print(f"Пользователь с id={user_id} не найден. Пропускаю ответ {ua_id}.")
+            continue
+        
+        # Находим тест (по testtype_id)
+        try:
+            test = Test.objects.filter(title__icontains=f"Тест {testtype_id}").first()
+            if not test:
+                # Попробуем найти по другому критерию
+                test = Test.objects.filter(created_at__isnull=False).order_by('-created_at').first()
+            
+            if not test:
+                print(f"Тест для testtype_id={testtype_id} не найден. Пропускаю ответ {ua_id}.")
+                continue
+        except Exception as e:
+            print(f"Ошибка при поиске теста для testtype_id={testtype_id}: {e}")
+            continue
+        
+        # Создаем запись об отправке теста
+        submission = TestSubmission.objects.create(
+            test=test,
+            student=user,
+            section_item=None,  # Не привязываем к конкретному элементу раздела
+            status='auto_passed' if is_complete else 'auto_failed',
+            score=1.0 if is_complete else 0.0
+        )
+        
+        # Создаем специфичные ответы в зависимости от типа теста
+        if test_type == 'choice_test':
+            # Для MCQ тестов создаем пустую запись (конкретные варианты не сохранялись в старой БД)
+            MCQSubmissionAnswer.objects.create(submission=submission)
+            
+        elif test_type == 'text_test' and text:
+            FreeTextSubmissionAnswer.objects.create(
+                submission=submission,
+                answer_text=text
+            )
+            
+        elif test_type == 'order_test':
+            # Для тестов на порядок создаем пустую запись
+            WordOrderSubmissionAnswer.objects.create(
+                submission=submission,
+                submitted_order_words=[]
+            )
+            
+        elif test_type == 'correlation_test':
+            # Для тестов на соотнесение создаем пустые записи
+            for slot in test.drag_drop_slots.all():
+                DragDropSubmissionAnswer.objects.create(
+                    submission=submission,
+                    slot=slot,
+                    dropped_option_text='',
+                    is_correct=None
+                )
+        
+        submission_count += 1
+    
+    print(f"Миграция ответов пользователей завершена. Создано {submission_count} записей.")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -828,6 +1188,8 @@ if __name__ == '__main__':
         migrate_section_texts(sqlite_conn)
         migrate_dict_service(sqlite_conn)
         migrate_material_service(sqlite_conn)
+        migrate_tests(sqlite_conn)
+        migrate_test_submissions(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()

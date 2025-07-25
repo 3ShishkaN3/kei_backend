@@ -11,30 +11,22 @@ class Command(BaseCommand):
     help = 'Migrate lesson sections from the legacy SQLite DB to the new Section model'
 
     def handle(self, *args, **options):
-        # Path to the legacy SQLite database
         legacy_db_path = os.path.join(settings.BASE_DIR, 'to_migrate', 'db.sqlite3')
         self.stdout.write(f'Connecting to legacy DB at {legacy_db_path}')
 
-        # Clear existing Section entries to rebuild from scratch
         Section.objects.all().delete()
         self.stdout.write(self.style.WARNING('Cleared existing Section entries'))
-        # Connect to legacy DB
         conn = sqlite3.connect(legacy_db_path)
         cur = conn.cursor()
 
-        # Fetch old Test entries (these represent sections) ordered by legacy lesson and id
         cur.execute("SELECT lesson_id, id, name FROM kei_school_test ORDER BY lesson_id, id")
         rows = cur.fetchall()
 
-        # Build mapping from legacy lessons to new Lesson IDs by matching course and lesson names
-        # Load legacy courses: id -> name
         cur.execute("SELECT id, name FROM kei_school_course")
         legacy_courses = {cid: cname for cid, cname in cur.fetchall()}
-        # Load legacy lessons: id, course_id, name
         cur.execute("SELECT id, course_id, name FROM kei_school_lesson")
         legacy_lessons = cur.fetchall()
 
-        # Map new Course objects by title
         db_courses = {c.title: c for c in Course.objects.all()}
         lesson_map = {}
         skipped = []
@@ -53,7 +45,6 @@ class Command(BaseCommand):
             for lid, reason in skipped:
                 self.stdout.write(self.style.WARNING(f"Skipping legacy lesson {lid}: {reason}"))
 
-        # Remap rows to new lesson IDs, skipping unmapped ones
         remapped = []
         for legacy_lesson_id, test_id, name in rows:
             new_lesson_id = lesson_map.get(legacy_lesson_id)
@@ -65,7 +56,6 @@ class Command(BaseCommand):
         order = 1
         created = 0
 
-        # Insert into new Section model
         with transaction.atomic():
             for new_lesson_id, test_id, name in rows:
                 if new_lesson_id != current_lesson:

@@ -12,7 +12,6 @@ class UserProfile(models.Model):
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
 
     def clear_fields(self):
-        """Очистка полей профиля"""
         self.phone_number = ""
         self.vk_link = ""
         self.telegram_link = ""

@@ -71,10 +71,9 @@ class LessonViewSet(viewsets.ModelViewSet):
              raise serializers.ValidationError({"course_id": "Изменение курса урока не разрешено."})
         serializer.save()
 
-    # Action для получения статуса завершения урока текущим пользователем
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated, CanViewLessonOrSectionContent])
     def completion_status(self, request, pk=None):
-        lesson = self.get_object() # Права на просмотр проверены CanViewLessonOrSectionContent
+        lesson = self.get_object()
         user = request.user
         try:
             completion = LessonCompletion.objects.get(lesson=lesson, student=user)
@@ -129,10 +128,6 @@ class LessonViewSet(viewsets.ModelViewSet):
 
 
 class SectionViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet для Разделов Урока.
-    Доступ к разделам определяется доступом к родительскому уроку.
-    """
     serializer_class = SectionSerializer
     permission_classes = [IsAuthenticated, SectionPermission]
     filter_backends = [filters.OrderingFilter]
@@ -176,7 +171,7 @@ class SectionViewSet(viewsets.ModelViewSet):
             return Response({"completed": False})
 
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanCompleteItems]) # Завершать могут записанные студенты
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanCompleteItems])
     def complete(self, request, lesson_pk=None, pk=None):
         section = self.get_object()
         student = request.user
@@ -212,7 +207,6 @@ class SectionViewSet(viewsets.ModelViewSet):
                     )
                     if lesson_created:
                         lesson_completion_created = True
-                        # Отправляем событие о завершении урока
                         send_to_kafka('progress_events', {
                             'type': 'lesson_completed',
                             'user_id': student.id,
@@ -236,18 +230,14 @@ class SectionViewSet(viewsets.ModelViewSet):
                 )
                 
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
-    def reorder_sections(self, request, lesson_pk=None, course_pk=None): # course_pk будет из URL
-        """
-        Изменяет порядок разделов в указанном уроке.
-        Ожидает POST-запрос с телом: [{"id": section_id1, "order": new_order1}, {"id": section_id2, "order": new_order2}, ...]
-        """
+    def reorder_sections(self, request, lesson_pk=None, course_pk=None):
         lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
 
         data = request.data
         if not isinstance(data, list):
             return Response({"error": "Ожидается список объектов с 'id' и 'order'."}, status=status.HTTP_400_BAD_REQUEST)
 
-        updates_map = {}  # {section_id: new_order}
+        updates_map = {}
         new_orders_set = set()
         section_ids_from_payload = []
 
@@ -305,8 +295,6 @@ class SectionViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                # Шаг 1: Присвоить временные УНИКАЛЬНЫЕ БОЛЬШИЕ ПОЛОЖИТЕЛЬНЫЕ order всем обновляемым секциям.
-                # Находим максимальный существующий order в уроке
                 max_current_order_obj = Section.objects.filter(lesson=lesson).aggregate(max_val=Max('order'))
                 max_current_order = max_current_order_obj['max_val'] if max_current_order_obj['max_val'] is not None else -1 
 
@@ -341,17 +329,9 @@ class SectionViewSet(viewsets.ModelViewSet):
             return Response({"error": f"Произошла непредвиденная ошибка: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
 class SectionItemViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet для управления элементами раздела (SectionItem).
-    Вложен в разделы, уроки и курсы.
-    """
     serializer_class = SectionItemSerializer
 
     def get_queryset(self):
-        """
-        Фильтрует элементы по ID раздела из URL.
-        Также проверяет права на просмотр родительской секции.
-        """
         section_pk = self.kwargs.get('section_pk')
         lesson_pk = self.kwargs.get('lesson_pk')
         course_pk = self.kwargs.get('course_pk')
@@ -372,18 +352,11 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         return SectionItem.objects.filter(section=section).select_related('content_type').order_by('order')
 
     def get_permissions(self):
-        """
-        Устанавливает права доступа в зависимости от действия.
-        """
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'reorder_items']:
             return [IsAuthenticated(), IsCourseStaffOrAdmin()]
         return [IsAuthenticated(), CanViewLessonOrSectionContent()]
 
     def _get_section_for_write_operations(self):
-        """
-        Вспомогательная функция для получения объекта Section для операций записи.
-        Проверяет права на запись через IsCourseStaffOrAdmin для родительского курса.
-        """
         section_pk = self.kwargs.get('section_pk')
         lesson_pk = self.kwargs.get('lesson_pk')
         course_pk = self.kwargs.get('course_pk')
@@ -395,7 +368,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
             lesson__course_id=course_pk
         )
         
-        # IsCourseStaffOrAdmin должен проверить права на course объекта section.lesson.course
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет прав на изменение содержимого этого раздела.")
         return section
@@ -475,7 +447,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         existing_type = serializer.initial_data.get('existing_content_type')
         existing_id = serializer.initial_data.get('existing_content_id')
 
-        update_kwargs_for_section_item_save = {} # Для обновления полей самого SectionItem
+        update_kwargs_for_section_item_save = {}
 
         try:
             with transaction.atomic():
@@ -484,18 +456,12 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                 new_object_id_for_item = current_instance.object_id     # По умолчанию не меняется
 
                 if material_data_for_update:
-                    # Проверяем, совпадает ли текущий тип контента с item_type из запроса
-                    # Если нет, или если content_object не существует, нужно создать новый.
-                    # (Смена типа контента - сложный сценарий, здесь упрощенно)
                     current_content_model_class = content_object_to_update_or_replace.__class__ if content_object_to_update_or_replace else None
                     target_material_model_class = CONTENT_TYPE_MAP[item_type]['model']
 
                     if current_content_model_class != target_material_model_class or not content_object_to_update_or_replace:
-                        # Тип меняется или контента не было - создаем новый контент
-                        # (старый content_object нужно будет отсоединить или удалить)
-                        if content_object_to_update_or_replace:
-                            # Логика отсоединения/удаления старого, если нужно
-                            pass
+                        # if content_object_to_update_or_replace:
+                        #     pass
                         
                         if item_type == 'test':
                             test_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
@@ -508,7 +474,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                         new_content_type_for_item = ContentType.objects.get_for_model(target_material_model_class)
                         new_object_id_for_item = content_object_to_update_or_replace.pk
                     else:
-                        # Тип тот же, обновляем существующий content_object
                         if item_type == 'test':
                             test_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
                             # partial=True важно для обновления
@@ -520,7 +485,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                             )
                             if test_serializer_instance.is_valid(raise_exception=True):
                                 content_object_to_update_or_replace = test_serializer_instance.save()
-                            # new_content_type_for_item и new_object_id_for_item не меняются
                         else: # Для простых материалов
                             for key, value in material_data_for_update.items():
                                 setattr(content_object_to_update_or_replace, key, value)
@@ -529,7 +493,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                     update_kwargs_for_section_item_save['content_type'] = new_content_type_for_item
                     update_kwargs_for_section_item_save['object_id'] = new_object_id_for_item
 
-                elif existing_type and existing_id: # Меняем связь на другой существующий контент
+                elif existing_type and existing_id:
                     if existing_type != item_type:
                         raise serializers.ValidationError(
                             {"detail": "Тип существующего контента для связи не совпадает с типом элемента."}
@@ -539,12 +503,9 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                     
                     update_kwargs_for_section_item_save['content_type'] = ContentType.objects.get_for_model(model_class)
                     update_kwargs_for_section_item_save['object_id'] = new_content_object.pk
-                    # (Логика удаления старого content_object, если он больше не нужен)
 
-                # Удаляем временные поля из validated_data перед сохранением SectionItem
                 serializer.validated_data.pop('validated_material_data', None)
                 
-                # Сохраняем изменения в SectionItem (например, order, item_type, и обновленные content_type/object_id)
                 serializer.save(**update_kwargs_for_section_item_save)
 
         except Exception as e:
@@ -553,10 +514,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
     def reorder_items(self, request, course_pk=None, lesson_pk=None, section_pk=None):
-        """
-        Изменяет порядок элементов в указанном разделе.
-        Ожидает POST-запрос с телом: [{"id": item_id1, "order": new_order1}, ...]
-        """
         section = self._get_section_for_write_operations()
 
         data = request.data

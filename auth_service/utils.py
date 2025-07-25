@@ -1,14 +1,34 @@
+"""
+Утилиты для сервиса аутентификации.
+
+Содержит функции для отправки email уведомлений и других вспомогательных операций.
+"""
+
 import logging
 from django.core.mail import send_mail
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+
 def send_confirmation_email(email, code, purpose):
     """
-    Отправка email с подтверждением.
-    purpose может принимать значения: 'registration', 'password_change', 'email_change'
+    Отправляет email с кодом подтверждения.
+    
+    Отправляет email с кодом подтверждения в зависимости от цели:
+    - registration: подтверждение регистрации
+    - password_change: смена пароля
+    - email_change: смена email
+    
+    Args:
+        email (str): Email адрес получателя
+        code (str): Код подтверждения
+        purpose (str): Цель отправки (registration, password_change, email_change)
+    
+    Returns:
+        None: Функция логирует результат отправки
     """
+    # Определяем тему и текст письма в зависимости от цели
     if purpose == "registration":
         subject = "Подтверждение регистрации"
         message = f"Ваш код подтверждения регистрации: {code}"
@@ -23,12 +43,13 @@ def send_confirmation_email(email, code, purpose):
         message = f"Ваш код подтверждения: {code}"
     
     try:
+        # Отправляем email с настройками из Django settings
         send_mail(
             subject,
             message,
-            settings.DEFAULT_FROM_EMAIL,
+            settings.DEFAULT_FROM_EMAIL,  # Отправитель из настроек
             [email],
-            fail_silently=False,
+            fail_silently=False,  # Вызываем исключение при ошибке
         )
         logger.info(f"Письмо успешно отправлено на {email} для {purpose}")
     except Exception as e:

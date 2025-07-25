@@ -13,7 +13,6 @@ class UserProfileView(RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        """Получаем профиль текущего пользователя"""
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
 
@@ -27,7 +26,6 @@ class UserProfileView(RetrieveUpdateAPIView):
 
     @swagger_auto_schema(responses={200: "Профиль очищен"})
     def delete(self, request, *args, **kwargs):
-        """Очистка профиля"""
         profile = self.get_object()
         profile.clear_fields()
         return Response({"message": "Профиль очищен"}, status=status.HTTP_200_OK)
@@ -37,7 +35,6 @@ class UserSettingsView(RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        """Получаем настройки текущего пользователя"""
         settings, _ = UserSettings.objects.get_or_create(user=self.request.user)
         return settings
 
@@ -46,7 +43,6 @@ class UserAvatarView(RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        """Получаем профиль текущего пользователя для работы с аватаром"""
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
 

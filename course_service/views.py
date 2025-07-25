@@ -66,11 +66,6 @@ class CourseViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def enrollment_status(self, request, pk=None):
-        """
-        Возвращает статус записи текущего пользователя на курс.
-        Если пользователь не записан — возвращает enrolled: False.
-        Если записан — возвращает enrolled: True и статус записи.
-        """
         course = self.get_object()
         user = request.user
 

@@ -1,4 +1,3 @@
-# material_service/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
@@ -19,13 +18,3 @@ router.register(r'submissions', TestSubmissionViewSet, basename='testsubmission'
 urlpatterns = [
     path('', include(router.urls)),
 ]
-
-# Примеры URL:
-# GET /api/materials/text/ - Список текстов
-# POST /api/materials/text/ - Создать текст
-# GET /api/materials/tests/ - Список тестов
-# POST /api/materials/tests/ - Создать тест (с вложенными компонентами)
-# GET /api/materials/tests/{test_pk}/ - Детали теста
-# POST /api/materials/tests/{test_pk}/submit/ - Отправить ответ на тест (студент)
-# GET /api/materials/submissions/ - Список отправок (студент видит свои, персонал - все)
-# GET /api/materials/submissions/{sub_pk}/ - Детали конкретной отправки

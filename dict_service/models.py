@@ -1,12 +1,11 @@
 from django.db import models, transaction
-from django.conf import settings # Для AUTH_USER_MODEL
+from django.conf import settings
 from django.utils import timezone
 from django.core.validators import FileExtensionValidator
 from course_service.models import Course
 from lesson_service.models import Lesson
 
 class DictionarySection(models.Model):
-    """Раздел словаря, привязанный к курсу."""
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
@@ -45,15 +44,11 @@ class DictionarySection(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        """
-        При сохранении, если is_primary=True, снимает флаг у других разделов этого же курса.
-        """
         if self.is_primary:
             DictionarySection.objects.filter(course=self.course).exclude(pk=self.pk).update(is_primary=False)
         super().save(*args, **kwargs)
 
 class DictionaryEntry(models.Model):
-    """Запись в словаре (слово/кандзи)."""
     section = models.ForeignKey(
         DictionarySection,
         on_delete=models.CASCADE,
@@ -62,8 +57,8 @@ class DictionaryEntry(models.Model):
     )
     lesson = models.ForeignKey(
         Lesson,
-        on_delete=models.SET_NULL, # Сохраняем слово, даже если урок удален
-        null=True, blank=True, # Слово может быть не привязано к конкретному уроку
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
         related_name='dictionary_entries',
         verbose_name="Урок (необязательно)"
     )
@@ -95,7 +90,6 @@ class DictionaryEntry(models.Model):
         return f"{self.term}{reading_part} - {self.section.title}"
 
 class UserLearnedEntry(models.Model):
-    """Отметка о том, что пользователь изучил словарную запись."""
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

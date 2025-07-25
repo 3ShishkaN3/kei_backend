@@ -1,17 +1,9 @@
-# material_service/permissions.py
 from rest_framework import permissions
 from lesson_service.models import SectionItem
 from course_service.models import CourseEnrollment
 
 
 class IsAdminOrStaffWriteOrReadOnly(permissions.BasePermission):
-    """
-    Разрешение: Чтение для всех аутентифицированных.
-    Запись (POST, PUT, PATCH, DELETE) для Админов, Учителей, Ассистентов.
-    ВАЖНО: Не проверяет привязку к КОНКРЕТНОМУ курсу здесь!
-           Эта проверка должна быть на уровне API Gateway или в lesson_service при линковке.
-           Или требует добавления прямой связи материала/теста с курсом.
-    """
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
@@ -24,11 +16,6 @@ class IsAdminOrStaffWriteOrReadOnly(permissions.BasePermission):
 
 
 class CanSubmitTest(permissions.BasePermission):
-    """
-    Проверяет, может ли студент отправить ответ на тест.
-    Требует, чтобы студент был активно записан на курс,
-    к которому относится SectionItem, связанный с тестом.
-    """
     message = "Вы не можете отправить ответ на этот тест. Убедитесь, что вы записаны на курс."
 
     def has_permission(self, request, view):

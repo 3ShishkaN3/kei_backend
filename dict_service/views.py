@@ -1,4 +1,3 @@
-# dict_service/views.py
 from django.shortcuts import get_object_or_404
 from django.db.models import Exists, OuterRef
 from rest_framework import viewsets, status, filters, mixins
@@ -21,15 +20,11 @@ from course_service.models import Course
 from lesson_service.models import Lesson
 
 class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20 # Количество элементов на странице
+    page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 100
 
 class DictionarySectionViewSet(viewsets.ModelViewSet):
-    """
-    Теперь работает и по /dictionary_sections/ (корень) и по
-    /courses/{course_pk}/dictionary_sections/ (вложенный).
-    """
     serializer_class = DictionarySectionSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
@@ -48,14 +43,11 @@ class DictionarySectionViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        # для write-действий — только персонал курса
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAuthenticated(), IsCourseStaffOrAdminForDict()]
-        # для чтения (list, retrieve) — проверяем право видеть контент
         return [IsAuthenticated(), CanViewDictionaryContent()]
 
     def perform_create(self, serializer):
-        # создаём только если передан course_pk
         course_pk = self.kwargs.get('course_pk')
         if not course_pk:
             raise serializers.ValidationError({"course_pk": "Для создания раздела обязательно указывать курс."})
@@ -64,7 +56,6 @@ class DictionarySectionViewSet(viewsets.ModelViewSet):
 
 
 class DictionaryEntryViewSet(viewsets.ModelViewSet):
-    """Управление записями словаря в рамках раздела."""
     serializer_class = DictionaryEntrySerializer
     permission_classes = [IsAuthenticated] 
     pagination_class = StandardResultsSetPagination
@@ -98,16 +89,12 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
                      )
                  )
              )
-             # Проверяем параметр запроса include_learned
              include_learned = self.request.query_params.get('include_learned', '').lower()
              if include_learned in ['true', '1', 'yes']:
-                 # Показываем все записи (включая изученные)
                  pass  
              elif include_learned in ['false', '0', 'no']:
-                 # Скрываем изученные записи
                  queryset = queryset.filter(user_has_learned=False)
              else:
-                 # Используем настройку пользователя по умолчанию
                  show_learned = get_user_show_learned_setting(user)
                  if not show_learned:
                      queryset = queryset.filter(user_has_learned=False)
@@ -115,12 +102,10 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
         return queryset
 
     def get_permissions(self):
-        """Чтение для тех, кто видит раздел, Запись - для персонала курса, Отметка - для тех, кто видит."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAuthenticated(), IsCourseStaffOrAdminForDict()]
         if self.action in ['mark_learned', 'unmark_learned']:
             return [IsAuthenticated(), CanMarkLearned()]
-        # list, retrieve
         return [IsAuthenticated(), CanViewDictionaryContent()]
 
     def get_serializer_context(self):
@@ -158,7 +143,6 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanMarkLearned])
     def mark_learned(self, request, section_pk=None, pk=None):
-        """Отметить запись как изученную."""
         entry = self.get_object() 
         user = request.user
         learned_entry, created = UserLearnedEntry.objects.get_or_create(user=user, entry=entry)
@@ -171,7 +155,6 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanMarkLearned])
     def unmark_learned(self, request, section_pk=None, pk=None):
-        """Снять отметку 'изучено'."""
         entry = self.get_object()
         user = request.user
         deleted_count, _ = UserLearnedEntry.objects.filter(user=user, entry=entry).delete()
@@ -183,7 +166,6 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, CanViewDictionaryContent])
     def meta(self, request, section_pk=None):
-        """Получить метаданные о записях словаря (общее количество, количество изученных и т.д.)."""
         section_pk = self.kwargs.get('section_pk')
         user = request.user
 
@@ -198,7 +180,6 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
         if not CanViewDictionaryContent().has_object_permission(self.request, self, section):
             self.permission_denied(self.request, message="Нет доступа к этому разделу словаря.")
 
-        # Получаем queryset с теми же фильтрами что и в get_queryset
         base_queryset = DictionaryEntry.objects.filter(section=section)
         
         total_count = base_queryset.count()
@@ -224,10 +205,6 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    """
-    Предоставляет список словарных записей из ОСНОВНОГО раздела курса
-    для КОНКРЕТНОГО урока. Используется для "книжечки" на уроке.
-    """
     serializer_class = DictionaryEntrySerializer
     permission_classes = [IsAuthenticated] # Доступ проверяется через урок
     pagination_class = StandardResultsSetPagination

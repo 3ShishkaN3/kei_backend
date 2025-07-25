@@ -4,7 +4,6 @@ import django
 import sqlite3
 import sys
 
-# Setup Django environment
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 cwd = os.getcwd()
@@ -18,14 +17,12 @@ django.setup()
 from lesson_service.models import Section
 from django.db import transaction
 
-# Path to legacy SQLite DB
 legacy_db_path = os.path.join(BASE_DIR, 'to_migrate', 'db.sqlite3')
 print(f"Connecting to legacy DB at {legacy_db_path}")
 conn = sqlite3.connect(legacy_db_path)
 print("Legacy DB tables:", [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table';")])
 cur = conn.cursor()
 
-# Fetch Test entries from legacy DB, ordered by lesson and id
 cur.execute("SELECT lesson_id, id, name FROM kei_school_test ORDER BY lesson_id, id")
 rows = cur.fetchall()
 

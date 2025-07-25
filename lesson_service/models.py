@@ -6,7 +6,6 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
 class Lesson(models.Model):
-    """Модель урока, связанного с курсом."""
     course = models.ForeignKey(
         Course,
         related_name='lessons',
@@ -34,17 +33,16 @@ class Lesson(models.Model):
     class Meta:
         verbose_name = "Урок"
         verbose_name_plural = "Уроки"
-        ordering = ['created_at'] # Можно добавить поле order для ручной сортировки
+        ordering = ['created_at']
 
     def __str__(self):
         return f"{self.title} (Курс: {self.course.title})"
 
 class Section(models.Model):
-    """Модель раздела внутри урока."""
     lesson = models.ForeignKey(
         Lesson,
         related_name='sections',
-        on_delete=models.CASCADE, # Разделы удаляются вместе с уроком
+        on_delete=models.CASCADE,
         verbose_name="Урок"
     )
     title = models.CharField(max_length=255, verbose_name="Название раздела")
@@ -67,7 +65,6 @@ class Section(models.Model):
         return f"{self.title} (Урок: {self.lesson.title}, Порядок: {self.order})"
 
 class SectionCompletion(models.Model):
-    """Модель для отслеживания завершения раздела учеником."""
     section = models.ForeignKey(
         Section,
         related_name='completions',
@@ -91,7 +88,6 @@ class SectionCompletion(models.Model):
         return f"{self.student.username} завершил раздел {self.section.title}"
 
 class LessonCompletion(models.Model):
-    """Модель для отслеживания завершения урока учеником."""
     lesson = models.ForeignKey(
         Lesson,
         related_name='completions',
@@ -116,10 +112,6 @@ class LessonCompletion(models.Model):
 
   
 class SectionItem(models.Model):
-    """
-    Элемент внутри раздела урока (текст, видео, тест и т.д.).
-    Использует GenericForeignKey для связи с конкретной моделью материала.
-    """
     ITEM_TYPE_CHOICES = (
         ('text', 'Текст'),
         ('image', 'Изображение'),
@@ -146,7 +138,6 @@ class SectionItem(models.Model):
         verbose_name="Тип элемента"
     )
 
-    # Поля для GenericForeignKey
     content_type = models.ForeignKey(
         ContentType,
         on_delete=models.CASCADE,
@@ -165,7 +156,6 @@ class SectionItem(models.Model):
         verbose_name = "Элемент раздела"
         verbose_name_plural = "Элементы разделов"
         ordering = ['section', 'order']
-        # Уникальность порядка в рамках раздела
         unique_together = ('section', 'order')
 
     def __str__(self):

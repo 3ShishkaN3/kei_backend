@@ -1,15 +1,10 @@
-# material_service/migrations/0003_create_new_interactive_test_models.py
-
 import django.db.models.deletion
 from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        # Зависит от предыдущей миграции, которая удалила старые модели
         ("material_service", "0002_remove_old_matching_wordorder_models"), 
-        # Также могут быть зависимости от других приложений, если ForeignKey на них есть
-        # например, от приложения, где определены ImageMaterial, AudioMaterial, если они в другом app
     ]
 
     operations = [
@@ -31,8 +26,8 @@ class Migration(migrations.Migration):
                 ("order", models.PositiveIntegerField(default=0, verbose_name="Порядок отображения цели")),
                 ("explanation", models.TextField(blank=True, null=True, verbose_name="Пояснение к этой цели/ответу")),
                 ("correct_item", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="correct_for_targets", to="material_service.draggableitem", verbose_name="Правильное облачко для этой цели")),
-                ("prompt_audio", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="match_target_prompts_audio", to="material_service.audiomaterial", verbose_name="Аудио-промпт цели")), # Изменил related_name
-                ("prompt_image", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="match_target_prompts_image", to="material_service.imagematerial", verbose_name="Изображение-промпт цели")), # Изменил related_name
+                ("prompt_audio", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="match_target_prompts_audio", to="material_service.audiomaterial", verbose_name="Аудио-промпт цели")),
+                ("prompt_image", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="match_target_prompts_image", to="material_service.imagematerial", verbose_name="Изображение-промпт цели")),
                 ("test", models.ForeignKey(limit_choices_to={"test_type": "drag-to-match"}, on_delete=django.db.models.deletion.CASCADE, related_name="match_targets", to="material_service.test")),
             ],
             options={"verbose_name": "Цель для соотнесения", "verbose_name_plural": "Цели для соотнесения", "ordering": ["test", "order"]},
@@ -66,11 +61,4 @@ class Migration(migrations.Migration):
             ],
             options={"verbose_name": "Ответ на порядок предложений", "verbose_name_plural": "Ответы на порядок предложений"},
         ),
-        # Если ты менял Test.TEST_TYPE_CHOICES, и это требует изменения поля в БД (редко),
-        # здесь была бы операция AlterField. Но обычно это изменение только в Python.
-        # migrations.AlterField(
-        #     model_name='test',
-        #     name='test_type',
-        #     field=models.CharField(choices=[('mcq-multi', 'Выбор нескольких ответов'), ('mcq-single', 'Выбор одного ответа'), ('free-text', 'Текстовый ответ'), ('sentence-order', 'Правильный порядок слов/фраз в предложении'), ('drag-to-match', 'Соотнесение перетаскиванием'), ('pronunciation', 'Проверка произношения'), ('spelling', 'Проверка правописания')], max_length=20, verbose_name='Тип теста'),
-        # ),
     ]

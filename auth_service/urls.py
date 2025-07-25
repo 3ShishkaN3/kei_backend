@@ -1,3 +1,10 @@
+"""
+URL конфигурация для сервиса аутентификации.
+
+Определяет маршруты для всех API endpoints сервиса аутентификации,
+включая регистрацию, вход, управление пользователями и подтверждения.
+"""
+
 from django.urls import path
 from .views import (
     CSRFTokenView, RegisterView, LoginView, LogoutView, UserRoleView,
@@ -7,26 +14,27 @@ from .views import (
 )
 
 urlpatterns = [
+    # CSRF токен для защиты от CSRF атак
     path("csrf-token/", CSRFTokenView.as_view(), name="csrf-token"),
     
+    # Основные операции аутентификации
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("user/<int:user_id>/role/", UserRoleView.as_view(), name="user-role"),
     path("user/", UserView.as_view(), name="user"),
     
-    # Подтверждение регистрации по email
+    # Подтверждение регистрации
     path("register/confirm/", RegistrationConfirmView.as_view(), name="register-confirm"),
     path("register/resend/", RegisterResendView.as_view(), name="register-resend"),
     
-    # Смена пароля
+    # Управление паролями
     path("password/reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
     path("password/reset/confirm/", ConfirmPasswordResetView.as_view(), name="password-reset-confirm"),
     path("password/change/request/", RequestPasswordChangeView.as_view(), name="password-change-request"),
     path("password/change/confirm/", ConfirmPasswordChangeView.as_view(), name="password-change-confirm"),
 
-    
-    # Смена email
+    # Управление email
     path("email/change/request/", RequestEmailChangeView.as_view(), name="email-change-request"),
     path("email/change/confirm/", ConfirmEmailChangeView.as_view(), name="email-change-confirm"),
 ]

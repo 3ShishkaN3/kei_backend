@@ -43,8 +43,6 @@ class DocumentMaterialSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('created_by', 'created_at', 'updated_at')
 
-# --- Сериализаторы для CRUD тестов и их компонентов ---
-
 class MCQOptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = MCQOption
@@ -60,16 +58,16 @@ class MatchingPairSerializer(serializers.ModelSerializer):
         model = MatchingPair
         fields = [
             'id', 'prompt_text',
-            'prompt_image', 'prompt_audio', # Actual FK fields for input/output
-            'prompt_image_details', 'prompt_audio_details', # Read-only for output
+            'prompt_image', 'prompt_audio',
+            'prompt_image_details', 'prompt_audio_details',
             'correct_answer_text', 'order', 'explanation'
         ]
         extra_kwargs = {
-            'test': {'read_only': True, 'required': False}, # Связь с Test устанавливается в TestSerializer
-            'order': {'required': False}, # Порядок будет управляться при сохранении
-            'correct_answer_text': {'required': True, 'allow_blank': False}, # Обязательное поле
-            'prompt_image': {'required': False, 'allow_null': True}, # Allow null for FK
-            'prompt_audio': {'required': False, 'allow_null': True}, # Allow null for FK
+            'test': {'read_only': True, 'required': False},
+            'order': {'required': False},
+            'correct_answer_text': {'required': True, 'allow_blank': False},
+            'prompt_image': {'required': False, 'allow_null': True},
+            'prompt_audio': {'required': False, 'allow_null': True},
         }
 
     def _get_request_user(self):
@@ -96,38 +94,31 @@ class MatchingPairSerializer(serializers.ModelSerializer):
             material_instance.delete()
 
     def create(self, validated_data):
-        # prompt_image_file and prompt_audio_file are now handled by the parent serializer (TestSerializer)
-        # and passed directly as arguments to this create method.
         prompt_image_file = self.context.get('prompt_image_file')
         prompt_audio_file = self.context.get('prompt_audio_file')
 
         user = self._get_request_user()
 
-        # Handle prompt_image_file
         if prompt_image_file:
             image_material = self._create_material_from_file(prompt_image_file, ImageMaterial, user, "MatchingPair Image")
             validated_data['prompt_image'] = image_material
         elif 'prompt_image' in validated_data and validated_data['prompt_image'] is None:
-            validated_data['prompt_image'] = None # Ensure it's explicitly set to None if provided as such
+            validated_data['prompt_image'] = None
 
-        # Handle prompt_audio_file
         if prompt_audio_file:
             audio_material = self._create_material_from_file(prompt_audio_file, AudioMaterial, user, "MatchingPair Audio")
             validated_data['prompt_audio'] = audio_material
         elif 'prompt_audio' in validated_data and validated_data['prompt_audio'] is None:
-            validated_data['prompt_audio'] = None # Ensure it's explicitly set to None if provided as such
+            validated_data['prompt_audio'] = None
 
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        # prompt_image_file and prompt_audio_file are now handled by the parent serializer (TestSerializer)
-        # and passed directly as arguments to this update method.
         prompt_image_file = self.context.get('prompt_image_file')
         prompt_audio_file = self.context.get('prompt_audio_file')
 
         user = self._get_request_user()
 
-        # Handle prompt_image_file update
         if prompt_image_file:
             if instance.prompt_image:
                 self._delete_material_if_exists(instance.prompt_image)
@@ -138,7 +129,6 @@ class MatchingPairSerializer(serializers.ModelSerializer):
                 self._delete_material_if_exists(instance.prompt_image)
             validated_data['prompt_image'] = None
 
-        # Handle prompt_audio_file update
         if prompt_audio_file:
             if instance.prompt_audio:
                 self._delete_material_if_exists(instance.prompt_audio)
@@ -153,7 +143,7 @@ class MatchingPairSerializer(serializers.ModelSerializer):
 
 
 
-# Добавляем сериализаторы для других компонентов (даже если они простые)
+
 class FreeTextQuestionSerializer(serializers.ModelSerializer):
      class Meta:
         model = FreeTextQuestion
@@ -222,8 +212,8 @@ class TestSerializer(serializers.ModelSerializer):
             'mcq_options', 
             'free_text_question', 
             'word_order_sentence',
-            'draggable_options_pool', # Новое поле для drag-and-drop
-            'drag_drop_slots',      # Новое поле для drag-and-drop
+            'draggable_options_pool',
+            'drag_drop_slots',
             'pronunciation_question', 
             'spelling_question',
             'attached_image_file', 
@@ -289,12 +279,12 @@ class TestSerializer(serializers.ModelSerializer):
                 if new_fk_id is not None:
                     try:
                         material_to_link = material_model_class.objects.get(pk=new_fk_id)
-                        if current_material_on_instance and current_material_on_instance.id != new_fk_id : # Удаляем старый, если он был и заменяется на другой существующий
+                        if current_material_on_instance and current_material_on_instance.id != new_fk_id:
                             self._delete_material_if_exists(current_material_on_instance)
                         setattr(test_instance, fk_field_name_on_test, material_to_link)
                     except material_model_class.DoesNotExist:
                         raise serializers.ValidationError({fk_field_name_on_test: f"Материал с ID {new_fk_id} не найден."})
-                else: # new_fk_id is None, это уже обработано `requested_fk_id_action is None`
+                else:
                     pass 
 
     def _handle_nested_many_to_many(self, test_instance, nested_data_list, related_manager_name, item_serializer_class, slot_image_files=None, slot_audio_files=None):
@@ -308,7 +298,6 @@ class TestSerializer(serializers.ModelSerializer):
             item_id = item_data.get('id')
             item_data['order'] = order_counter
 
-            # Prepare context for nested serializer with specific file for this slot
             nested_serializer_context = self.context.copy()
             nested_serializer_context['prompt_image_file'] = slot_image_files[order_counter] if slot_image_files and order_counter < len(slot_image_files) else None
             nested_serializer_context['prompt_audio_file'] = slot_audio_files[order_counter] if slot_audio_files and order_counter < len(slot_audio_files) else None
@@ -324,7 +313,7 @@ class TestSerializer(serializers.ModelSerializer):
                 item_serializer.is_valid(raise_exception=True)
                 new_item = item_serializer.save(test=test_instance)
                 current_ids_in_payload.add(new_item.id)
-            order_counter += 1 # Increment after processing each item
+            order_counter += 1
         ids_to_delete = set(existing_items_map.keys()) - current_ids_in_payload
         if ids_to_delete:
             manager.filter(id__in=ids_to_delete).delete()
@@ -341,7 +330,6 @@ class TestSerializer(serializers.ModelSerializer):
                 item_serializer.is_valid(raise_exception=True); item_serializer.save(test=test_instance)
         elif existing_item: 
              existing_item.delete()
-             # setattr(test_instance, related_name_on_test, None) # Не нужно, ForeignKey обнулится при save instance
 
     def validate(self, attrs):
         attrs = super().validate(attrs) 
@@ -352,9 +340,9 @@ class TestSerializer(serializers.ModelSerializer):
         if options_pool_data is None:
             if self.instance: 
                 options_pool_data = self.instance.draggable_options_pool
-            else: # Создание
+            else:
                 options_pool_data = [] 
-                attrs['draggable_options_pool'] = options_pool_data # Добавляем, если не было
+                attrs['draggable_options_pool'] = options_pool_data
 
         if not isinstance(options_pool_data, list) or not all(isinstance(opt, str) for opt in options_pool_data):
             raise serializers.ValidationError({"draggable_options_pool": "Должен быть списком строк."})
@@ -417,7 +405,6 @@ class TestSerializer(serializers.ModelSerializer):
         
         test_instance = Test.objects.create(**validated_data)
 
-        # Get the list of files from the request context
         request_files = self.context.get('request').FILES if 'request' in self.context else {}
         slot_image_files = request_files.getlist('prompt_image_file')
         slot_audio_files = request_files.getlist('prompt_audio_file')
@@ -454,7 +441,6 @@ class TestSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        # Get the list of files from the request context
         request_files = self.context.get('request').FILES if 'request' in self.context else {}
         slot_image_files = request_files.getlist('prompt_image_file')
         slot_audio_files = request_files.getlist('prompt_audio_file')
@@ -477,9 +463,7 @@ class TestSerializer(serializers.ModelSerializer):
         return instance
 
 
-# --- Сериализаторы для отправки ответов ---
 class BaseSubmissionAnswerSerializer(serializers.Serializer):
-    """Базовый класс для валидации ответов (можно использовать для разных типов)."""
     pass
 
 
@@ -504,7 +488,6 @@ class WordOrderSubmissionAnswerSerializer(BaseSubmissionAnswerSerializer):
     )
 
 class MatchingSubmissionAnswerItemSerializer(serializers.Serializer):
-    """Ответ для одной пары в тесте на соотнесение."""
     matching_pair_id = serializers.IntegerField(required=True)
     submitted_answer_text = serializers.CharField(required=True, max_length=500)
 
@@ -530,7 +513,6 @@ class DragDropSubmissionAnswerDetailSerializer(serializers.ModelSerializer):
     slot_prompt_text = serializers.CharField(source='slot.prompt_text', read_only=True, allow_null=True)
     slot_correct_answer_text = serializers.CharField(source='slot.correct_answer_text', read_only=True)
     
-    # Для отображения деталей prompt_image/audio из связанного слота (MatchingPair)
     prompt_image_details = ImageMaterialSerializer(source='slot.prompt_image', read_only=True, allow_null=True)
     prompt_audio_details = AudioMaterialSerializer(source='slot.prompt_audio', read_only=True, allow_null=True)
 
@@ -560,14 +542,12 @@ class WordOrderSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
         fields = ['submitted_order_words']
 
 class PronunciationSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
-    # Assuming submitted_audio_file URL is needed
     submitted_audio_file = serializers.FileField(read_only=True) 
     class Meta:
         model = PronunciationSubmissionAnswer
         fields = ['submitted_audio_file']
 
 class SpellingSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
-    # Assuming submitted_image_file URL is needed
     submitted_image_file = serializers.ImageField(read_only=True)
     class Meta:
         model = SpellingSubmissionAnswer
@@ -576,9 +556,7 @@ class SpellingSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
 class TestSubmissionDetailSerializer(serializers.ModelSerializer):
     test_details = TestSerializer(source='test', read_only=True)
     student_details = UserSerializer(source='student', read_only=True)
-    # section_item_details = SectionItemSerializer(source='section_item', read_only=True) # Removed due to circular import
 
-    # Nested serializers for answers based on test type
     mcq_answers = MCQSubmissionAnswerOutputSerializer(read_only=True)
     free_text_answer = FreeTextSubmissionAnswerOutputSerializer(read_only=True)
     word_order_answer = WordOrderSubmissionAnswerOutputSerializer(read_only=True)
@@ -637,9 +615,9 @@ class TestSubmissionInputSerializer(serializers.Serializer):
             if answer_validator_serializer.is_valid():
                 valid_option_ids = set(test.mcq_options.values_list('id', flat=True))
                 submitted_ids = set(answer_validator_serializer.validated_data.get('selected_option_ids', []))
-                if not submitted_ids.issubset(valid_option_ids) and submitted_ids: # Проверяем только если есть отправленные ID
+                if not submitted_ids.issubset(valid_option_ids) and submitted_ids:
                     validation_errors['selected_option_ids'] = "Один или несколько ID вариантов ответа не принадлежат этому тесту."
-                if test_type == 'mcq-single' and len(submitted_ids) > 1 : # Пустой массив для single означает нет ответа
+                if test_type == 'mcq-single' and len(submitted_ids) > 1 :
                     validation_errors['selected_option_ids'] = "Для этого теста должен быть выбран не более одного варианта."
             else:
                 validation_errors = answer_validator_serializer.errors
@@ -666,7 +644,7 @@ class TestSubmissionInputSerializer(serializers.Serializer):
                  validation_errors = answer_validator_serializer.errors
         
         elif test_type in ['pronunciation', 'spelling']:
-            pass # Валидация файла происходит в общем validate методе
+            pass
         
         else:
             raise serializers.ValidationError(f"Неизвестный тип теста для валидации ответов: {test_type}")
@@ -678,9 +656,7 @@ class TestSubmissionInputSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         test = self.context.get('test')
-        # Файлы уже будут в self.initial_data.get('submitted_audio_file') и т.д. если это multipart
-        # или в attrs['submitted_audio_file'] если они были в JSON (не наш случай для файлов)
-        # request.FILES доступен через self.context['request'].FILES
+
         request_files = self.context['request'].FILES if 'request' in self.context else {}
 
         if test:

@@ -1,5 +1,4 @@
 #!/bin/sh
-# wait-for-kafka-and-run.sh
 
 set -e
 
@@ -9,7 +8,6 @@ CMD="$@"
 
 echo "Waiting for Kafka at $KAFKA_HOST:$KAFKA_PORT..."
 
-# Loop until we can establish a connection with Kafka
 while ! nc -z $KAFKA_HOST $KAFKA_PORT; do
   >&2 echo "Kafka is unavailable - sleeping"
   sleep 1

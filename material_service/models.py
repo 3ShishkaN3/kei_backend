@@ -5,7 +5,6 @@ from django.core.validators import FileExtensionValidator
 from django.utils import timezone
 
 class TextMaterial(models.Model):
-    """Текстовый материал (статья, инструкция)."""
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     content = models.TextField(verbose_name="Содержимое (текст или Markdown)")
     is_markdown = models.BooleanField(default=False, verbose_name="Использовать Markdown")
@@ -25,7 +24,6 @@ class TextMaterial(models.Model):
         return self.title or f"Текст #{self.id}"
 
 class ImageMaterial(models.Model):
-    """Изображение (фото, гиф, иллюстрация)."""
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     alt_text = models.CharField(max_length=255, blank=True, verbose_name="Alt текст (для доступности)")
     image = models.ImageField(
@@ -52,7 +50,6 @@ class ImageMaterial(models.Model):
         return self.title or f"Изображение #{self.id}"
 
 class AudioMaterial(models.Model):
-    """Аудио материал (произношение, диалог)."""
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     audio_file = models.FileField(
         upload_to='material_audio/',
@@ -80,7 +77,6 @@ class AudioMaterial(models.Model):
         return self.title or f"Аудио #{self.id}"
 
 class VideoMaterial(models.Model):
-    """Видео материал (урок, объяснение)."""
     VIDEO_SOURCE_CHOICES = (
         ('url', 'URL (YouTube, Vimeo, etc.)'),
         ('file', 'Загруженный файл'),
@@ -121,7 +117,6 @@ class VideoMaterial(models.Model):
         return self.title or f"Видео #{self.id}"
 
 class DocumentMaterial(models.Model):
-    """Документ (PDF, конспект, презентация)."""
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     document_file = models.FileField(
         upload_to='material_docs/',
@@ -149,8 +144,8 @@ class Test(models.Model):
         ('mcq-multi', 'Выбор нескольких ответов'),
         ('mcq-single', 'Выбор одного ответа'),
         ('free-text', 'Текстовый ответ'),
-        ('word-order', 'Правильный порядок слов (в строке)'), # Старый word-order для предложений
-        ('drag-and-drop', 'Перетаскивание элементов (облачка и ячейки)'), # Новый тип
+        ('word-order', 'Правильный порядок слов (в строке)'),
+        ('drag-and-drop', 'Перетаскивание элементов (облачка и ячейки)'),
         ('pronunciation', 'Проверка произношения'),
         ('spelling', 'Проверка правописания'),
     )
@@ -186,7 +181,6 @@ class Test(models.Model):
 
 
 class MCQOption(models.Model):
-    """Вариант ответа для тестов типа MCQ."""
     test = models.ForeignKey(
         Test,
         on_delete=models.CASCADE,
@@ -206,10 +200,9 @@ class MCQOption(models.Model):
         ordering = ['test', 'order']
 
     def __str__(self):
-        return f"Опция для '{self.test.title}': {self.text}"
+        return f"{self.text} (Тест: {self.test.title})"
 
 class FreeTextQuestion(models.Model):
-    """Дополнительные данные для теста с текстовым ответом."""
     test = models.OneToOneField(
         Test,
         on_delete=models.CASCADE,
@@ -217,7 +210,6 @@ class FreeTextQuestion(models.Model):
         limit_choices_to={'test_type': 'free-text'},
         verbose_name="Тест с текстовым ответом"
     )
-    # Поле для правильного ответа (если проверка автоматическая) или эталона
     reference_answer = models.TextField(blank=True, null=True, verbose_name="Эталонный ответ (для сверки)")
     explanation = models.TextField(blank=True, null=True, verbose_name="Пояснение/Контекст к заданию")
 
@@ -226,8 +218,7 @@ class FreeTextQuestion(models.Model):
         verbose_name_plural = "Вопросы с текстовым ответом"
 
     def __str__(self):
-        return f"Вопрос для '{self.test.title}'"
-
+        return f"Текстовый вопрос для теста: {self.test.title}"
 
 class WordOrderSentence(models.Model):
     test = models.OneToOneField( 
@@ -255,17 +246,16 @@ class WordOrderSentence(models.Model):
         verbose_name_plural = "Задания на порядок слов (из пула)"
 
     def __str__(self):
-        return f"Порядок слов для '{self.test.title}'"
+        return f"Порядок слов для теста: {self.test.title}"
 
-class MatchingPair(models.Model): # Теперь это "Ячейка/Слот" для drag-and-drop теста
+class MatchingPair(models.Model):
     test = models.ForeignKey(
         Test,
         on_delete=models.CASCADE,
-        related_name='drag_drop_slots', # Переименовали related_name для ясности
-        limit_choices_to={'test_type': 'drag-and-drop'}, # Только для нового типа теста
+        related_name='drag_drop_slots',
+        limit_choices_to={'test_type': 'drag-and-drop'},
         verbose_name="Тест (Перетаскивание)"
     )
-    # prompt_text, prompt_image, prompt_audio - это то, С ЧЕМ соотносим (задание для ячейки)
     prompt_text = models.CharField(max_length=500, blank=True, null=True, verbose_name="Текст-задание для ячейки (если есть)")
     prompt_image = models.ForeignKey(
         ImageMaterial, null=True, blank=True, on_delete=models.SET_NULL,
@@ -286,14 +276,11 @@ class MatchingPair(models.Model): # Теперь это "Ячейка/Слот" 
         verbose_name_plural = "Ячейки для перетаскивания (слоты)"
         ordering = ['test', 'order']
 
-
     def __str__(self):
-        return f"Слот для '{self.test.title}' (Правильный ответ: {self.correct_answer_text})"
-
+        return f"Ячейка {self.order} для теста: {self.test.title}"
 
 class PronunciationQuestion(models.Model):
-    """Данные для теста на проверку произношения."""
-    test = models.OneToOneField( # Один вопрос на тест
+    test = models.OneToOneField(
         Test,
         on_delete=models.CASCADE,
         related_name='pronunciation_question',
@@ -309,10 +296,9 @@ class PronunciationQuestion(models.Model):
         verbose_name_plural = "Вопросы на произношение"
 
     def __str__(self):
-        return f"Произношение для '{self.test.title}'"
+        return f"Вопрос на произношение для теста: {self.test.title}"
 
 class SpellingQuestion(models.Model):
-    """Данные для теста на проверку правописания."""
     test = models.OneToOneField( 
         Test,
         on_delete=models.CASCADE,
@@ -328,11 +314,9 @@ class SpellingQuestion(models.Model):
         verbose_name_plural = "Вопросы на правописание"
 
     def __str__(self):
-        return f"Правописание для '{self.test.title}'"
-
+        return f"Вопрос на правописание для теста: {self.test.title}"
 
 class TestSubmission(models.Model):
-    """Запись об отправке теста студентом."""
     SUBMISSION_STATUS_CHOICES = (
         ('submitted', 'Отправлено (ожидает автопроверки/отправки на проверку)'),
         ('grading_pending', 'На проверке'),
@@ -376,25 +360,20 @@ class TestSubmission(models.Model):
         ordering = ['-submitted_at']
 
     def __str__(self):
-        return f"Отправка '{self.test.title}' студентом {self.student.username} в {self.submitted_at}"
-    
+        return f"{self.student.username} - {self.test.title} ({self.get_status_display()})"
+
 class MCQSubmissionAnswer(models.Model):
-    """Выбранный вариант(ы) ответа для MCQ теста."""
     submission = models.ForeignKey(TestSubmission, on_delete=models.CASCADE, related_name='mcq_answers')
-    # Используем ManyToManyField для связи с выбранными опциями
     selected_options = models.ManyToManyField(
         MCQOption,
-        related_name='submissions_selected_in',
-        verbose_name="Выбранные варианты"
+        verbose_name="Выбранные варианты ответов"
     )
-
 
     class Meta:
         verbose_name = "Ответ на MCQ"
         verbose_name_plural = "Ответы на MCQ"
 
 class FreeTextSubmissionAnswer(models.Model):
-    """Отправленный текстовый ответ."""
     submission = models.OneToOneField(TestSubmission, on_delete=models.CASCADE, related_name='free_text_answer')
     answer_text = models.TextField(verbose_name="Текст ответа студента")
 
@@ -403,7 +382,6 @@ class FreeTextSubmissionAnswer(models.Model):
         verbose_name_plural = "Ответы текстом"
 
 class WordOrderSubmissionAnswer(models.Model):
-    """Отправленный порядок слов."""
     submission = models.OneToOneField(TestSubmission, on_delete=models.CASCADE, related_name='word_order_answer')
     submitted_order_words = models.JSONField(default=list, verbose_name="Отправленный порядок слов (JSON)")
 
@@ -412,11 +390,10 @@ class WordOrderSubmissionAnswer(models.Model):
         verbose_name_plural = "Ответы на порядок слов"
 
 class DragDropSubmissionAnswer(models.Model):
-    """Ответ студента для одной ячейки в drag-and-drop тесте."""
     submission = models.ForeignKey(TestSubmission, on_delete=models.CASCADE, related_name='drag_drop_answers')
-    slot = models.ForeignKey(MatchingPair, on_delete=models.CASCADE, verbose_name="Ячейка (слот)") # Связь с "ячейкой"
+    slot = models.ForeignKey(MatchingPair, on_delete=models.CASCADE, verbose_name="Ячейка (слот)")
     dropped_option_text = models.CharField(max_length=500, verbose_name="Текст перетащенного облачка")
-    is_correct = models.BooleanField(null=True, blank=True, verbose_name="Ответ правильный?") # Может быть установлено при пошаговой проверке
+    is_correct = models.BooleanField(null=True, blank=True, verbose_name="Ответ правильный?")
 
     class Meta:
         verbose_name = "Ответ на перетаскивание в ячейку"
@@ -424,7 +401,6 @@ class DragDropSubmissionAnswer(models.Model):
         unique_together = ('submission', 'slot') 
 
 class MatchingSubmissionAnswer(models.Model):
-    """Отправленное соотнесение для одной пары."""
     submission = models.ForeignKey(TestSubmission, on_delete=models.CASCADE, related_name='matching_answers')
     matching_pair = models.ForeignKey(MatchingPair, on_delete=models.CASCADE, verbose_name="Пара (задание)")
     submitted_answer_text = models.CharField(max_length=500, verbose_name="Соотнесенное 'облачко' (ответ студента)")
@@ -432,15 +408,14 @@ class MatchingSubmissionAnswer(models.Model):
     class Meta:
         verbose_name = "Ответ на соотнесение"
         verbose_name_plural = "Ответы на соотнесение"
-        unique_together = ('submission', 'matching_pair') # Один ответ на пару в рамках одной отправки
+        unique_together = ('submission', 'matching_pair')
 
 class PronunciationSubmissionAnswer(models.Model):
-    """Отправленное аудио для проверки произношения."""
     submission = models.OneToOneField(TestSubmission, on_delete=models.CASCADE, related_name='pronunciation_answer')
     submitted_audio_file = models.FileField(
-        upload_to='submission_pronunciation/',
-        validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a'])], # Пример
-        verbose_name="Запись произношения студента"
+        upload_to='test_pronunciation_answers/',
+        validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a'])],
+        verbose_name="Аудио ответ студента"
     )
 
     class Meta:
@@ -448,11 +423,10 @@ class PronunciationSubmissionAnswer(models.Model):
         verbose_name_plural = "Ответы на произношение"
 
 class SpellingSubmissionAnswer(models.Model):
-    """Отправленное изображение для проверки правописания."""
     submission = models.OneToOneField(TestSubmission, on_delete=models.CASCADE, related_name='spelling_answer')
     submitted_image_file = models.ImageField(
-        upload_to='submission_spelling/',
-        verbose_name="Фото написания студента"
+        upload_to='test_spelling_answers/',
+        verbose_name="Изображение с написанным ответом"
     )
 
     class Meta:

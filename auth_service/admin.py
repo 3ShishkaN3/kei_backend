@@ -1,3 +1,8 @@
-from django.contrib import admin
+"""
+Административная панель для сервиса аутентификации.
 
-# Register your models here.
+Содержит конфигурацию Django admin для управления пользователями
+и кодами подтверждения через веб-интерфейс.
+"""
+
+from django.contrib import admin

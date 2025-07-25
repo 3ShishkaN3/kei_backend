@@ -5,10 +5,8 @@ import sqlite3
 import django
 import shutil
 
-# Добавляем корневую директорию проекта в PYTHONPATH
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kei_backend'))
 
-# Настройка Django для доступа к моделям
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "kei_backend.settings")
 django.setup()
 
@@ -22,20 +20,15 @@ from dict_service.models import DictionarySection, DictionaryEntry, UserLearnedE
 from material_service.models import TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial
 from lesson_service.models import SectionItem
 
-# --- НАСТРОЙКИ ---
-# Старая база данных SQLite
 SQLITE_DB_PATH = 'to_migrate/db.sqlite3'
 
-# Новая база данных PostgreSQL (данные из docker-compose.yml)
 POSTGRES_DB_NAME = "kei_db"
 POSTGRES_USER = "kei_user"
 POSTGRES_PASSWORD = "kei_password"
-POSTGRES_HOST = "postgres" # Имя сервиса из docker-compose
+POSTGRES_HOST = "postgres"
 POSTGRES_PORT = "5432"
-# --- КОНЕЦ НАСТРОЕК ---
 
 def get_sqlite_connection():
-    """Подключается к базе данных SQLite."""
     try:
         conn = sqlite3.connect(SQLITE_DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -46,7 +39,6 @@ def get_sqlite_connection():
         return None
 
 def get_postgres_connection():
-    """Подключается к базе данных PostgreSQL."""
     try:
         conn = psycopg2.connect(
             dbname=POSTGRES_DB_NAME,
@@ -63,10 +55,8 @@ def get_postgres_connection():
         return None
 
 def migrate_users(sqlite_conn):
-    """Мигрирует пользователей из SQLite в PostgreSQL, исправляя username и роли."""
     print("\nНачинаю миграцию/обновление пользователей (username и роли)...")
     sqlite_cursor = sqlite_conn.cursor()
-    # Объединяем с userinfo, чтобы получить nickname
     sqlite_cursor.execute("""
         SELECT 
             u.id, u.password, u.last_login, u.is_superuser, u.username as old_username, 
@@ -83,9 +73,7 @@ def migrate_users(sqlite_conn):
     for old_user_data in old_users:
         try:
             user_to_update = User.objects.filter(email__iexact=old_user_data['email']).first()
-            # Если пользователь не найден в новой базе, создаем нового пользователя
             if not user_to_update:
-                # Определяем роль на основе старых данных
                 if old_user_data['is_superuser']:
                     new_role = User.Role.ADMIN
                 elif old_user_data['is_staff']:
@@ -93,10 +81,8 @@ def migrate_users(sqlite_conn):
                 else:
                     new_role = User.Role.STUDENT
 
-                # Определяем username (nickname если есть, иначе старый username)
                 new_username = old_user_data['nickname'] if old_user_data['nickname'] else old_user_data['old_username']
 
-                # Обеспечиваем уникальность username
                 base_username = new_username
                 unique_username = base_username
                 suffix_i = 1
@@ -105,7 +91,6 @@ def migrate_users(sqlite_conn):
                     suffix_i += 1
                 new_username = unique_username
 
-                # Создаем нового пользователя
                 user_to_update = User.objects.create(
                     username=new_username,
                     email=old_user_data['email'].lower(),
@@ -121,14 +106,12 @@ def migrate_users(sqlite_conn):
                 updated_count += 1
                 continue
 
-            # --- Логика определения роли ---
             if old_user_data['is_superuser']:
                 new_role = User.Role.ADMIN
             elif old_user_data['is_staff']:
                 new_role = User.Role.TEACHER
             else:
                 new_role = User.Role.STUDENT
-            # --- Конец логики ---
 
             new_username = old_user_data['nickname'] if old_user_data['nickname'] else old_user_data['old_username']
             
@@ -142,7 +125,6 @@ def migrate_users(sqlite_conn):
 
             fields_to_update = []
             if username_changed:
-                # Проверяем на конфликт username перед сохранением
                 if User.objects.filter(username__iexact=new_username).exclude(pk=user_to_update.pk).exists():
                     print(f"Новый username '{new_username}' для пользователя {user_to_update.email} уже занят. Пропускаю обновление username.")
                 else:
@@ -171,11 +153,9 @@ def migrate_users(sqlite_conn):
 
 
 def migrate_groups_and_permissions(sqlite_conn):
-    """Мигрирует группы и их связи с пользователями."""
     print("\nНачинаю миграцию групп и связей...")
     sqlite_cursor = sqlite_conn.cursor()
 
-    # Миграция групп
     sqlite_cursor.execute("SELECT * FROM auth_group")
     old_groups = sqlite_cursor.fetchall()
     for old_group in old_groups:
@@ -188,7 +168,6 @@ def migrate_groups_and_permissions(sqlite_conn):
         else:
             print(f"Группа '{group.name}' уже существует.")
 
-    # Миграция связей пользователь-группа
     sqlite_cursor.execute("SELECT * FROM auth_user_groups")
     old_user_groups = sqlite_cursor.fetchall()
     for user_group in old_user_groups:
@@ -204,15 +183,12 @@ def migrate_groups_and_permissions(sqlite_conn):
 
 
 def migrate_user_service(sqlite_conn):
-    """Мигрирует данные для UserProfile и UserSettings, включая аватары."""
     print("\nНачинаю миграцию user_service...")
     sqlite_cursor = sqlite_conn.cursor()
 
-    # Пути к медиа-папкам внутри контейнера
     OLD_MEDIA_ROOT = 'to_migrate/media'
     NEW_MEDIA_ROOT = 'media'
 
-    # Миграция UserProfile из старой UserInfo
     print("Мигрирую UserProfile (включая аватары)...")
     sqlite_cursor.execute("SELECT * FROM kei_school_userinfo")
     old_user_infos = sqlite_cursor.fetchall()
@@ -220,25 +196,21 @@ def migrate_user_service(sqlite_conn):
         try:
             user = User.objects.get(id=info['user_id'])
             
-            # --- Миграция файла аватара ---
             old_avatar_relative_path = info['avatar']
-            new_avatar_db_path = None  # Путь для записи в БД по умолчанию
+            new_avatar_db_path = None
 
             if old_avatar_relative_path:
                 source_path = os.path.join(OLD_MEDIA_ROOT, old_avatar_relative_path)
                 dest_path = os.path.join(NEW_MEDIA_ROOT, old_avatar_relative_path)
                 
                 if os.path.exists(source_path):
-                    # Убедимся, что директория для нового файла существует
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                    shutil.copy2(source_path, dest_path)  # copy2 сохраняет метаданные
-                    new_avatar_db_path = old_avatar_relative_path  # Путь в БД - относительный
+                    shutil.copy2(source_path, dest_path)
+                    new_avatar_db_path = old_avatar_relative_path
                     print(f"Скопирован аватар для '{user.username}'.")
                 else:
                     print(f"Файл аватара не найден: {source_path}")
-            # --- Конец миграции файла ---
 
-            # Используем update_or_create для идемпотентного создания/обновления
             profile, created = UserProfile.objects.update_or_create(
                 user=user,
                 defaults={
@@ -255,7 +227,6 @@ def migrate_user_service(sqlite_conn):
         except User.DoesNotExist:
             print(f"Пользователь с id={info['user_id']} не найден. Пропускаю профиль.")
 
-    # Миграция UserSettings (логика остается прежней)
     print("\nМигрирую UserSettings...")
     sqlite_cursor.execute("SELECT * FROM kei_school_usersettings")
     old_user_settings = sqlite_cursor.fetchall()
@@ -279,17 +250,13 @@ def migrate_user_service(sqlite_conn):
 
 
 def migrate_course_service(sqlite_conn):
-    """Мигрирует данные для Course, CourseEnrollment и CourseTeacher."""
     print("\nНачинаю миграцию course_service...")
     sqlite_cursor = sqlite_conn.cursor()
 
-    # Пути к медиа-папкам внутри контейнера
     OLD_MEDIA_ROOT = 'to_migrate/media'
     NEW_MEDIA_ROOT = 'media'
 
-    # 1. Миграция основных данных курсов
     print("Мигрирую курсы...")
-    # Ищем автора по умолчанию (первый админ или учитель)
     default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
     
     status_mapping = {
@@ -300,7 +267,6 @@ def migrate_course_service(sqlite_conn):
     sqlite_cursor.execute("SELECT * FROM kei_school_course")
     old_courses = sqlite_cursor.fetchall()
     for course_data in old_courses:
-        # --- Миграция изображения курса ---
         old_image_path = course_data['image']
         new_image_db_path = None
         if old_image_path:
@@ -313,7 +279,6 @@ def migrate_course_service(sqlite_conn):
                 print(f"Скопировано изображение для курса '{course_data['name']}'.")
             else:
                 print(f"Файл изображения не найден: {source_path}")
-        # --- Конец миграции изображения ---
 
         new_status = status_mapping.get(course_data['status'], 'draft')
 
@@ -333,7 +298,6 @@ def migrate_course_service(sqlite_conn):
         else:
             print(f"Курс '{course.title}' обновлен.")
 
-    # 2. Миграция связей пользователей с курсами
     print("\nМигрирую связи пользователей с курсами...")
     sqlite_cursor.execute("SELECT * FROM kei_school_usercourse")
     old_enrollments = sqlite_cursor.fetchall()
@@ -342,7 +306,6 @@ def migrate_course_service(sqlite_conn):
             user = User.objects.get(id=enroll_data['user_id'])
             course = Course.objects.get(id=enroll_data['course_id'])
 
-            # Создаем CourseEnrollment для всех
             enrollment, created = CourseEnrollment.objects.get_or_create(
                 student=user,
                 course=course
@@ -350,7 +313,6 @@ def migrate_course_service(sqlite_conn):
             if created:
                 print(f"Пользователь '{user.username}' записан на курс '{course.title}'.")
             
-            # Если пользователь - учитель или админ, делаем его CourseTeacher
             if user.role in [User.Role.TEACHER, User.Role.ADMIN]:
                 teacher, created = CourseTeacher.objects.get_or_create(
                     teacher=user,
@@ -368,18 +330,14 @@ def migrate_course_service(sqlite_conn):
 
 
 def migrate_lesson_service(sqlite_conn):
-    """Мигрирует данные для Lesson, Section и LessonCompletion."""
     print("\nНачинаю миграцию lesson_service...")
     sqlite_cursor = sqlite_conn.cursor()
 
-    # Пути к медиа-папкам
     OLD_MEDIA_ROOT = 'to_migrate/media'
     NEW_MEDIA_ROOT = 'media'
     
-    # Автор по умолчанию для уроков
     default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
 
-    # 1. Миграция уроков и создание одного раздела для каждого
     print("Мигрирую уроки и создаю разделы...")
     sqlite_cursor.execute("SELECT * FROM kei_school_lesson")
     old_lessons = sqlite_cursor.fetchall()
@@ -387,7 +345,6 @@ def migrate_lesson_service(sqlite_conn):
         try:
             course = Course.objects.get(id=lesson_data['course_id'])
 
-            # --- Миграция изображения урока ---
             old_image_path = lesson_data['image']
             new_image_db_path = None
             if old_image_path:
@@ -400,7 +357,6 @@ def migrate_lesson_service(sqlite_conn):
                     print(f"Скопировано изображение для урока '{lesson_data['name']}'.")
                 else:
                     print(f"Файл изображения не найден: {source_path}")
-            # --- Конец миграции изображения ---
 
             lesson, created = Lesson.objects.update_or_create(
                 id=lesson_data['id'],
@@ -420,7 +376,6 @@ def migrate_lesson_service(sqlite_conn):
         except Course.DoesNotExist:
             print(f"Курс с id={lesson_data['course_id']} не найден. Пропускаю урок '{lesson_data['name']}'.")
 
-    # 2. Миграция прогресса прохождения уроков
     print("\nМигрирую прогресс прохождения уроков...")
     sqlite_cursor.execute("SELECT * FROM kei_school_userlesson WHERE is_complete = 1")
     old_completions = sqlite_cursor.fetchall()
@@ -446,10 +401,6 @@ def migrate_lesson_service(sqlite_conn):
 
 
 def migrate_sections(sqlite_conn):
-    """
-    Мигрирует разделы (Section) из старой таблицы Test (kei_school_test).
-    Только структуры разделов, без содержимого.
-    """
     print("\nНачинаю миграцию разделов (Section) из kei_school_test...")
     sqlite_cursor = sqlite_conn.cursor()
     sqlite_cursor.execute("SELECT * FROM kei_school_test")
@@ -473,7 +424,6 @@ def migrate_sections(sqlite_conn):
 
 
 def migrate_section_texts(sqlite_conn):
-    """Мигрирует текстовые материалы разделов из старой таблицы Test."""
     print("\nНачинаю миграцию текстовых материалов разделов...")
     sqlite_cursor = sqlite_conn.cursor()
     from material_service.models import TextMaterial
@@ -511,29 +461,24 @@ def migrate_section_texts(sqlite_conn):
 
 
 def migrate_dict_service(sqlite_conn):
-    """Мигрирует данные словаря из старой таблицы Practice и PracticeCard."""
     print("\nНачинаю миграцию dict_service...")
     sqlite_cursor = sqlite_conn.cursor()
 
-    # Пути к медиа-папкам внутри контейнера
     OLD_MEDIA_ROOT = 'to_migrate/media'
     NEW_MEDIA_ROOT = 'media'
 
-    # Автор по умолчанию для словарных записей
     default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
 
-    # 1. Миграция разделов словаря (DictionarySection) из kei_school_practice
     print("Мигрирую разделы словаря...")
     sqlite_cursor.execute("SELECT * FROM kei_school_practice")
     old_practices = sqlite_cursor.fetchall()
     
-    practice_to_section_mapping = {}  # Для связи старых practice_id с новыми section_id
+    practice_to_section_mapping = {}
     
     for practice_data in old_practices:
         try:
             course = Course.objects.get(id=practice_data['course_id'])
             
-            # --- Миграция изображения раздела ---
             old_image_path = practice_data['image']
             new_image_db_path = None
             if old_image_path:
@@ -546,9 +491,7 @@ def migrate_dict_service(sqlite_conn):
                     print(f"Скопировано изображение для раздела '{practice_data['name']}'.")
                 else:
                     print(f"Файл изображения не найден: {source_path}")
-            # --- Конец миграции изображения ---
 
-            # Определяем, является ли раздел основным (первый раздел курса)
             is_primary = not DictionarySection.objects.filter(course=course).exists()
 
             section, created = DictionarySection.objects.update_or_create(
@@ -571,20 +514,17 @@ def migrate_dict_service(sqlite_conn):
         except Course.DoesNotExist:
             print(f"Курс с id={practice_data['course_id']} не найден. Пропускаю раздел '{practice_data['name']}'.")
 
-    # 2. Миграция словарных записей (DictionaryEntry) из kei_school_practicecard
     print("\nМигрирую словарные записи...")
     sqlite_cursor.execute("SELECT * FROM kei_school_practicecard")
     old_practice_cards = sqlite_cursor.fetchall()
     
     for card_data in old_practice_cards:
         try:
-            # Получаем соответствующий раздел словаря
             section = practice_to_section_mapping.get(card_data['practice_id'])
             if not section:
                 print(f"Раздел словаря для practice_id={card_data['practice_id']} не найден. Пропускаю карточку.")
                 continue
 
-            # Получаем урок, если указан target_lesson_id
             lesson = None
             if card_data['target_lesson_id']:
                 try:
@@ -592,7 +532,6 @@ def migrate_dict_service(sqlite_conn):
                 except Lesson.DoesNotExist:
                     print(f"Урок с id={card_data['target_lesson_id']} не найден. Карточка будет без привязки к уроку.")
 
-            # --- Миграция аудио файла ---
             old_audio_path = card_data['audio']
             new_audio_db_path = None
             if old_audio_path:
@@ -605,12 +544,7 @@ def migrate_dict_service(sqlite_conn):
                     print(f"Скопировано аудио для карточки '{card_data['text_front']}'.")
                 else:
                     print(f"Аудио файл не найден: {source_path}")
-            # --- Конец миграции аудио ---
 
-            # Создаем словарную запись
-            # text_front -> term (кандзи/слово)
-            # text_back -> reading (произношение)
-            # description_back -> translation (перевод)
             entry, created = DictionaryEntry.objects.update_or_create(
                 section=section,
                 term=card_data['text_front'],
@@ -631,7 +565,6 @@ def migrate_dict_service(sqlite_conn):
         except Exception as e:
             print(f"Ошибка при миграции карточки {card_data['id']}: {e}")
 
-    # 3. Миграция изученных записей (UserLearnedEntry) из kei_school_userpractice
     print("\nМигрирую изученные записи...")
     sqlite_cursor.execute("SELECT * FROM kei_school_userpractice WHERE is_complete = 1")
     old_user_practices = sqlite_cursor.fetchall()
@@ -640,8 +573,6 @@ def migrate_dict_service(sqlite_conn):
         try:
             user = User.objects.get(id=user_practice['user_id'])
             
-            # Находим соответствующую словарную запись
-            # Для этого нужно найти карточку по practice_card_id и затем найти запись
             sqlite_cursor.execute("SELECT * FROM kei_school_practicecard WHERE id = ?", (user_practice['practice_card_id'],))
             card_data = sqlite_cursor.fetchone()
             
@@ -649,13 +580,11 @@ def migrate_dict_service(sqlite_conn):
                 print(f"Карточка с id={user_practice['practice_card_id']} не найдена. Пропускаю изученную запись.")
                 continue
             
-            # Находим раздел словаря
             section = practice_to_section_mapping.get(card_data['practice_id'])
             if not section:
                 print(f"Раздел словаря для practice_id={card_data['practice_id']} не найден. Пропускаю изученную запись.")
                 continue
             
-            # Находим словарную запись
             entry = DictionaryEntry.objects.filter(
                 section=section,
                 term=card_data['text_front']
@@ -665,7 +594,6 @@ def migrate_dict_service(sqlite_conn):
                 print(f"Словарная запись '{card_data['text_front']}' не найдена. Пропускаю изученную запись.")
                 continue
             
-            # Создаем запись об изучении
             learned_entry, created = UserLearnedEntry.objects.get_or_create(
                 user=user,
                 entry=entry
@@ -683,7 +611,6 @@ def migrate_dict_service(sqlite_conn):
 
 
 def migrate_material_service(sqlite_conn):
-    """Мигрирует статичные материалы: текст, изображения, аудио, видео, документы."""
     import os
     import shutil
     from auth_service.models import User
@@ -699,14 +626,12 @@ def migrate_material_service(sqlite_conn):
     default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
 
     counts = {'images': 0, 'audio': 0, 'videos': 0, 'docs': 0, 'skipped': 0}
-    # Словарь для маппинга старого пути к импортированному материалу
     old_to_material_map = {}
 
     for root, dirs, files in os.walk(OLD_MEDIA_ROOT):
         for fname in files:
             ext = fname.lower().rsplit('.', 1)[-1]
             old_path = os.path.join(root, fname)
-            # Определяем класс материала по расширению (все форматы поддерживаются)
             if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'heic', 'heif', 'hevc', 'avif']:
                 ModelClass = ImageMaterial
                 file_field = ModelClass.get_file_field_name()
@@ -728,16 +653,13 @@ def migrate_material_service(sqlite_conn):
                 subdir = 'material_docs'
                 key = 'docs'
             else:
-                # Остальные форматы считаем документами
                 ModelClass = DocumentMaterial
                 file_field = 'document_file'
                 subdir = 'material_docs'
                 key = 'docs'
 
-            # Подготовка пути для поля в БД (используем относительный путь из OLD_MEDIA_ROOT)
             old_rel_path = os.path.relpath(old_path, OLD_MEDIA_ROOT)
             new_file_db_path = f"{subdir}/{old_rel_path}"
-            # Ограничиваем длину пути согласно max_length поля
             field = ModelClass._meta.get_field(file_field)
             max_len = field.max_length
             if len(new_file_db_path) > max_len:
@@ -750,7 +672,6 @@ def migrate_material_service(sqlite_conn):
                     basename = name[:allow_len - (len(ext2) + 1)] + "." + ext2
                 new_file_db_path = os.path.join(dirname, basename)
                 print(f"Нормализован путь материала: {new_file_db_path}")
-            # Создание записи в БД
             defaults = {'title': '', 'created_by': default_author}
             if file_field == 'video_file':
                 defaults['source_type'] = 'file'
@@ -762,12 +683,10 @@ def migrate_material_service(sqlite_conn):
                 if created:
                     print(f"Создан {ModelClass.__name__} для файла {new_file_db_path}")
                     counts[key] += 1
-                    # Запоминаем материал для последующей привязки
                     old_to_material_map[old_rel_path] = material
             except Exception as e:
                 print(f"Ошибка создания записи {ModelClass.__name__} для {new_file_db_path}: {e}")
                 continue
-            # Копирование файла после создания записи
             dest_path = os.path.join(NEW_MEDIA_ROOT, new_file_db_path)
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             try:
@@ -776,7 +695,6 @@ def migrate_material_service(sqlite_conn):
                 print(f"Ошибка копирования {old_path} -> {dest_path}: {e}")
 
     print("\nМиграция material_service (статичных материалов) завершена.")
-    # Привязка материалов к разделам на основе старой БД
     print("\nНачинаю привязку материалов к разделам...")
     sqlite_cursor.execute(
         """
@@ -815,7 +733,6 @@ def migrate_material_service(sqlite_conn):
 
 
 def migrate_tests(sqlite_conn):
-    """Мигрирует тесты из старой БД в новую структуру."""
     print("\nНачинаю миграцию тестов...")
     sqlite_cursor = sqlite_conn.cursor()
     
@@ -828,22 +745,18 @@ def migrate_tests(sqlite_conn):
     from lesson_service.models import Section, SectionItem
     from django.contrib.contenttypes.models import ContentType
     
-    # Пути к медиа-папкам
     OLD_MEDIA_ROOT = 'to_migrate/media'
     NEW_MEDIA_ROOT = 'media'
     default_author = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.TEACHER]).first()
     
-    # Словарь для маппинга старых путей к новым материалам
     old_to_material_map = {}
     
-    # Сначала создаем маппинг материалов (если еще не создан)
     print("Создаю маппинг материалов для тестов...")
     for root, dirs, files in os.walk(OLD_MEDIA_ROOT):
         for fname in files:
             old_path = os.path.join(root, fname)
             old_rel_path = os.path.relpath(old_path, OLD_MEDIA_ROOT)
             
-            # Ищем материал в БД
             try:
                 if fname.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp')):
                     material = ImageMaterial.objects.filter(image__endswith=fname).first()
@@ -857,15 +770,13 @@ def migrate_tests(sqlite_conn):
             except Exception as e:
                 print(f"Ошибка при поиске материала {fname}: {e}")
     
-    # Маппинг типов тестов
     type_mapping = {
-        'choice_test': 'mcq-single',  # Будем проверять количество правильных ответов
+        'choice_test': 'mcq-single',
         'text_test': 'free-text',
         'order_test': 'word-order',
         'correlation_test': 'drag-and-drop'
     }
     
-    # Получаем все тесты из старой БД
     sqlite_cursor.execute("""
         SELECT 
             tt.id as testtype_id,
@@ -888,19 +799,16 @@ def migrate_tests(sqlite_conn):
         testtype_id, old_type, question, test_id, image_path, audio_path, lesson_id, test_name = test_data
         
         try:
-            # Находим соответствующий раздел
             section = Section.objects.get(lesson_id=lesson_id, order=test_id)
         except Section.DoesNotExist:
             print(f"Раздел для теста {testtype_id} (lesson_id={lesson_id}, test_id={test_id}) не найден. Пропускаю.")
             continue
         
-        # Определяем новый тип теста
         new_type = type_mapping.get(old_type)
         if not new_type:
             print(f"Неизвестный тип теста: {old_type}. Пропускаю тест {testtype_id}.")
             continue
         
-        # Обрабатываем медиа файлы
         attached_image = None
         attached_audio = None
         
@@ -916,7 +824,6 @@ def migrate_tests(sqlite_conn):
             else:
                 print(f"Аудио {audio_path} не найдено в материалах.")
         
-        # Создаем тест
         title = question[:250] if question else f"Тест {testtype_id}"
         test = Test.objects.create(
             title=title,
@@ -927,9 +834,7 @@ def migrate_tests(sqlite_conn):
             created_by=default_author
         )
         
-        # Создаем специфичные данные в зависимости от типа теста
         if old_type == 'choice_test':
-            # Получаем варианты ответов
             sqlite_cursor.execute("""
                 SELECT 
                     a.id as answer_id,
@@ -943,9 +848,8 @@ def migrate_tests(sqlite_conn):
             """, (testtype_id,))
             
             choices = sqlite_cursor.fetchall()
-            correct_count = sum(1 for choice in choices if choice[1])  # choice[1] - is_correct
+            correct_count = sum(1 for choice in choices if choice[1])
             
-            # Если больше одного правильного ответа, меняем тип на множественный выбор
             if correct_count > 1:
                 test.test_type = 'mcq-multi'
                 test.save()
@@ -953,20 +857,18 @@ def migrate_tests(sqlite_conn):
             else:
                 test_counts['mcq-single'] += 1
             
-            # Создаем варианты ответов
             for i, choice in enumerate(choices):
                 MCQOption.objects.create(
                     test=test,
-                    text=choice[3] or f'Вариант {i+1}',  # choice_answer
-                    is_correct=bool(choice[1]),  # is_correct
-                    explanation=choice[2] or '',  # explanation
+                    text=choice[3] or f'Вариант {i+1}',
+                    is_correct=bool(choice[1]),
+                    explanation=choice[2] or '',
                     order=i + 1
                 )
             
             print(f"Создан MCQ тест '{title}' с {len(choices)} вариантами ответов.")
             
         elif old_type == 'text_test':
-            # Получаем текстовый ответ
             sqlite_cursor.execute("""
                 SELECT 
                     a.explanation,
@@ -981,15 +883,14 @@ def migrate_tests(sqlite_conn):
             if text_answer:
                 FreeTextQuestion.objects.create(
                     test=test,
-                    reference_answer=text_answer[1] or '',  # text_answer
-                    explanation=text_answer[0] or ''  # explanation
+                    reference_answer=text_answer[1] or '',
+                    explanation=text_answer[0] or ''
                 )
             
             test_counts['free-text'] += 1
             print(f"Создан текстовый тест '{title}'.")
             
         elif old_type == 'order_test':
-            # Получаем правильный порядок слов
             sqlite_cursor.execute("""
                 SELECT 
                     a.explanation,
@@ -1001,11 +902,10 @@ def migrate_tests(sqlite_conn):
             """, (testtype_id,))
             
             order_answers = sqlite_cursor.fetchall()
-            correct_order = [answer[1] for answer in order_answers if answer[1]]  # order_answer
+            correct_order = [answer[1] for answer in order_answers if answer[1]]
             
             if correct_order:
-                # Создаем пул всех вариантов для drag-and-drop
-                all_options = list(set(correct_order))  # Убираем дубликаты
+                all_options = list(set(correct_order))
                 test.draggable_options_pool = all_options
                 test.save()
                 
@@ -1013,14 +913,13 @@ def migrate_tests(sqlite_conn):
                     test=test,
                     correct_ordered_texts=correct_order,
                     display_prompt='',
-                    explanation=order_answers[0][0] or ''  # explanation из первого ответа
+                    explanation=order_answers[0][0] or ''
                 )
             
             test_counts['word-order'] += 1
             print(f"Создан тест на порядок слов '{title}' с {len(correct_order)} элементами.")
             
         elif old_type == 'correlation_test':
-            # Получаем пары для соотнесения
             sqlite_cursor.execute("""
                 SELECT 
                     a.id as answer_id,
@@ -1037,32 +936,29 @@ def migrate_tests(sqlite_conn):
             
             correlations = sqlite_cursor.fetchall()
             
-            # Создаем пул всех вариантов
-            all_options = list(set(corr[3] for corr in correlations if corr[3]))  # correlation_answer
+            all_options = list(set(corr[3] for corr in correlations if corr[3]))
             test.draggable_options_pool = all_options
             test.save()
             
-            # Создаем слоты (ячейки) для drag-and-drop
             for i, corr in enumerate(correlations):
                 prompt_image = None
-                if corr[4]:  # photo
+                if corr[4]:
                     if corr[4] in old_to_material_map:
                         prompt_image = old_to_material_map[corr[4]]
                 
                 MatchingPair.objects.create(
                     test=test,
-                    prompt_text='',  # В старой БД нет текстового промпта
+                    prompt_text='',
                     prompt_image=prompt_image,
                     prompt_audio=None,
-                    correct_answer_text=corr[3] or '',  # correlation_answer
+                    correct_answer_text=corr[3] or '',
                     order=i + 1,
-                    explanation=corr[2] or ''  # explanation
+                    explanation=corr[2] or ''
                 )
             
             test_counts['drag-and-drop'] += 1
             print(f"Создан тест на соотнесение '{title}' с {len(correlations)} парами.")
         
-        # Привязываем тест к разделу
         content_type = ContentType.objects.get_for_model(Test)
         item_order = section.items.count() + 1
         SectionItem.objects.create(
@@ -1080,7 +976,6 @@ def migrate_tests(sqlite_conn):
 
 
 def migrate_test_submissions(sqlite_conn):
-    """Мигрирует ответы пользователей на тесты."""
     print("\nНачинаю миграцию ответов пользователей на тесты...")
     sqlite_cursor = sqlite_conn.cursor()
     
@@ -1090,7 +985,6 @@ def migrate_test_submissions(sqlite_conn):
         DragDropSubmissionAnswer
     )
     
-    # Получаем все ответы пользователей
     sqlite_cursor.execute("""
         SELECT 
             ua.id,
@@ -1112,17 +1006,14 @@ def migrate_test_submissions(sqlite_conn):
         ua_id, is_complete, testtype_id, user_id, text, test_type, testtype_id = ua
         
         try:
-            # Находим пользователя
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             print(f"Пользователь с id={user_id} не найден. Пропускаю ответ {ua_id}.")
             continue
         
-        # Находим тест (по testtype_id)
         try:
             test = Test.objects.filter(title__icontains=f"Тест {testtype_id}").first()
             if not test:
-                # Попробуем найти по другому критерию
                 test = Test.objects.filter(created_at__isnull=False).order_by('-created_at').first()
             
             if not test:
@@ -1132,18 +1023,15 @@ def migrate_test_submissions(sqlite_conn):
             print(f"Ошибка при поиске теста для testtype_id={testtype_id}: {e}")
             continue
         
-        # Создаем запись об отправке теста
         submission = TestSubmission.objects.create(
             test=test,
             student=user,
-            section_item=None,  # Не привязываем к конкретному элементу раздела
+            section_item=None,
             status='auto_passed' if is_complete else 'auto_failed',
             score=1.0 if is_complete else 0.0
         )
         
-        # Создаем специфичные ответы в зависимости от типа теста
         if test_type == 'choice_test':
-            # Для MCQ тестов создаем пустую запись (конкретные варианты не сохранялись в старой БД)
             MCQSubmissionAnswer.objects.create(submission=submission)
             
         elif test_type == 'text_test' and text:
@@ -1153,14 +1041,12 @@ def migrate_test_submissions(sqlite_conn):
             )
             
         elif test_type == 'order_test':
-            # Для тестов на порядок создаем пустую запись
             WordOrderSubmissionAnswer.objects.create(
                 submission=submission,
                 submitted_order_words=[]
             )
             
         elif test_type == 'correlation_test':
-            # Для тестов на соотнесение создаем пустые записи
             for slot in test.drag_drop_slots.all():
                 DragDropSubmissionAnswer.objects.create(
                     submission=submission,

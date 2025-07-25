@@ -36,8 +36,6 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-# Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -107,7 +105,6 @@ DATABASES = {
     }
 }
 
-# Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -128,20 +125,17 @@ LOCALE_PATHS = [
 ]
 
 
-# Internationalization
 LANGUAGE_CODE = 'ru'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'auth_service.User'
 
-# Безопасные cookie
 CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_NAME = "csrftoken"
@@ -169,8 +163,8 @@ CSRF_TRUSTED_ORIGINS = [
 
 
 AUTHENTICATION_BACKENDS = [
-    'auth_service.backends.EmailOrUsernameModelBackend',  # Подключаем кастомный бэкенд
-    'django.contrib.auth.backends.ModelBackend',  # Оставляем стандартный бэкенд
+    'auth_service.backends.EmailOrUsernameModelBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
 
@@ -182,7 +176,6 @@ AXES_USERNAME_CALLABLE = 'auth_service.axes_utils.get_axes_username'
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
-# Настройки почты
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST')
 EMAIL_PORT = config('EMAIL_PORT', cast=int)
@@ -191,7 +184,6 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
 
-# Logging configuration
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

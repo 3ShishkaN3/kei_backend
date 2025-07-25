@@ -1,14 +1,11 @@
-# dict_service/serializers.py
 from rest_framework import serializers
 from .models import DictionarySection, DictionaryEntry, UserLearnedEntry
 from auth_service.serializers import UserSerializer
 
 def get_user_show_learned_setting(user):
-    """Получает настройку пользователя, обрабатывая ее отсутствие."""
     if not user or not user.is_authenticated:
         return True 
     try:
-
         if hasattr(user, 'settings') and user.settings:
             return user.settings.show_learned_items
         else:
@@ -62,15 +59,12 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
         return None
 
     def get_is_learned(self, obj):
-        """Проверяет, изучил ли текущий пользователь эту запись."""
         user = self.context.get('request').user
         if user and user.is_authenticated:
-             # return UserLearnedEntry.objects.filter(user=user, entry=obj).exists()
-             return getattr(obj, 'user_has_learned', False)
+            return getattr(obj, 'user_has_learned', False)
         return False
 
 class UserLearnedEntrySerializer(serializers.ModelSerializer):
-    """Сериализатор для ответа после отметки 'изучено'."""
     entry_id = serializers.IntegerField(source='entry.id')
     user_id = serializers.IntegerField(source='user.id')
     term = serializers.CharField(source='entry.term', read_only=True)

@@ -4,10 +4,12 @@ from .models import Lesson, Section, SectionCompletion, LessonCompletion, Sectio
 from auth_service.serializers import UserSerializer
 from material_service.serializers import (
     TextMaterialSerializer, ImageMaterialSerializer, AudioMaterialSerializer,
-    VideoMaterialSerializer, DocumentMaterialSerializer, TestSerializer
+    VideoMaterialSerializer, DocumentMaterialSerializer, TestSerializer,
+    TestSubmissionDetailSerializer
 )
 from material_service.models import (
-    TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial, Test
+    TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial, Test,
+    TestSubmission
 )
 
 CONTENT_TYPE_MAP = {
@@ -53,7 +55,41 @@ class SectionItemSerializer(serializers.ModelSerializer):
                      context['request'] = None
 
                 try:
-                    return serializer_class(content_object, context=context).data
+                    data = serializer_class(content_object, context=context).data
+                    # Дополнительно: если это тест и у пользователя включено отображение ответов —
+                    # прикладываем последнюю отправку пользователя по этому тесту в рамках этого элемента раздела
+                    if item_type == 'test' and context.get('request') and hasattr(context['request'], 'user'):
+                        user = context['request'].user
+                        user_settings = getattr(user, 'settings', None)
+                        show_answers = True
+                        try:
+                            if user.is_authenticated:
+                                if user_settings is not None:
+                                    show_answers = getattr(user_settings, 'show_test_answers', True)
+                                else:
+                                    show_answers = True
+                            else:
+                                show_answers = True
+                        except Exception:
+                            show_answers = True
+
+                        if show_answers:
+                            try:
+                                last_submission = (
+                                    TestSubmission.objects.filter(test=content_object, student=user, section_item=obj)
+                                    .order_by('-submitted_at')
+                                    .first()
+                                )
+                                if last_submission is not None:
+                                    submission_serializer = TestSubmissionDetailSerializer(
+                                        last_submission,
+                                        context={'request': context.get('request')}
+                                    )
+                                    data['student_submission_details'] = submission_serializer.data
+                            except Exception:
+                                # Не прерываем сериализацию урока при ошибке получения отправки
+                                pass
+                    return data
                 except Exception as e:
                     print(f"Error serializing content for item {obj.id} (type: {item_type}): {e}")
                     return {"error": "Could not serialize content details."}

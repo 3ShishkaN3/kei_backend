@@ -1,6 +1,6 @@
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -27,18 +27,92 @@ class CourseViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = Course.objects.all()
         
-        if user.is_authenticated and user.role in ['admin', 'teacher', 'assistant']:
+        # Для админов и преподавателей - показываем все курсы с возможностью фильтрации по статусу
+        if user.is_authenticated and user.role in ['admin', 'teacher']:
             status_filter = self.request.query_params.get('status')
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
-        else:
-            queryset = queryset.filter(status='published')
-        
-
-        if user.is_authenticated and user.role not in ['admin', 'teacher', 'assistant']:
+        # Для помощников - показываем все курсы (они могут быть и студентами, и админами)
+        elif user.is_authenticated and user.role == 'assistant':
+            # Проверяем, есть ли у помощника записи на курсы как у студента
+            has_enrollments = CourseEnrollment.objects.filter(
+                student=user, 
+                status='active'
+            ).exists()
+            
+            if has_enrollments:
+                # Если помощник записан на курсы как студент, применяем студенческую логику сортировки
+                # Получаем ID курсов, на которые записан помощник
+                enrolled_course_ids = Course.objects.filter(
+                    enrollments__student=user, 
+                    enrollments__status='active'
+                ).values_list('id', flat=True)
+                
+                queryset = Course.objects.filter(
+                    Q(id__in=enrolled_course_ids) |
+                    Q(status='free') |
+                    Q(status='published')
+                ).distinct()
+                
+                # Добавляем аннотации для сортировки
+                queryset = queryset.annotate(
+                    is_enrolled=Case(
+                        When(id__in=enrolled_course_ids, then=1),
+                        default=0,
+                        output_field=IntegerField(),
+                    ),
+                    course_priority=Case(
+                        When(status='published', then=1),
+                        When(status='free', then=2),
+                        default=3,
+                        output_field=IntegerField(),
+                    )
+                )
+                
+                # Сортируем: сначала записанные курсы, затем доступные
+                queryset = queryset.order_by('is_enrolled', 'course_priority', '-created_at')
+            else:
+                # Если помощник не записан на курсы, показываем все курсы с возможностью фильтрации
+                status_filter = self.request.query_params.get('status')
+                if status_filter:
+                    queryset = queryset.filter(status=status_filter)
+        # Для обычных пользователей (студентов) - специальная логика сортировки
+        elif user.is_authenticated and user.role == 'student':
+            # Получаем ID курсов, на которые записан пользователь
+            enrolled_course_ids = Course.objects.filter(
+                enrollments__student=user, 
+                enrollments__status='active'
+            ).values_list('id', flat=True)
+            
+            # Получаем все курсы, которые должны быть видны студенту
+            # (записанные + бесплатные + опубликованные)
             queryset = Course.objects.filter(
-                Q(status='free') | Q(enrollments__student=user)
+                Q(id__in=enrolled_course_ids) |
+                Q(status='free') |
+                Q(status='published')
             ).distinct()
+            
+            # Добавляем аннотации для сортировки
+            queryset = queryset.annotate(
+                is_enrolled=Case(
+                    When(id__in=enrolled_course_ids, then=1),
+                    default=0,
+                    output_field=IntegerField(),
+                ),
+                course_priority=Case(
+                    When(status='published', then=1),
+                    When(status='free', then=2),
+                    default=3,
+                    output_field=IntegerField(),
+                )
+            )
+            
+            # Сортируем: сначала записанные курсы, затем доступные
+            # Внутри каждой группы: сначала платные (published), затем бесплатные (free)
+            queryset = queryset.order_by('is_enrolled', 'course_priority', '-created_at')
+        else:
+            # Для неавторизованных пользователей - только опубликованные курсы
+            queryset = queryset.filter(status='published')
         
         created_by = self.request.query_params.get('created_by')
         if created_by:

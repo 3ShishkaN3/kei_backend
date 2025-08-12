@@ -35,17 +35,55 @@ class DictionarySectionViewSet(viewsets.ModelViewSet):
         qs = DictionarySection.objects.select_related('course')
 
         if course_pk:
+            # Если передан course_pk, проверяем доступ к курсу
             course = get_object_or_404(Course, pk=course_pk)
             if not CanViewDictionaryContent().has_object_permission(self.request, self, course):
                 self.permission_denied(self.request, message="Нет доступа к словарю этого курса.")
             qs = qs.filter(course=course)
+        else:
+            # Если course_pk не передан, фильтруем по доступным пользователю курсам
+            user = self.request.user
+            
+            # Для админов и преподавателей показываем все разделы
+            if user.is_staff or user.is_superuser or (hasattr(user, 'role') and user.role == 'admin'):
+                pass  # Показываем все разделы
+            else:
+                # Для обычных пользователей фильтруем по доступным курсам
+                accessible_courses = []
+                
+                # Курсы, на которые записан пользователь
+                enrolled_courses = Course.objects.filter(
+                    enrollments__student=user,
+                    enrollments__status='active'
+                )
+                accessible_courses.extend(enrolled_courses)
+                
+                # Курсы, где пользователь является преподавателем или помощником
+                teacher_courses = Course.objects.filter(teachers__teacher=user)
+                assistant_courses = Course.objects.filter(assistants__assistant=user)
+                accessible_courses.extend(teacher_courses)
+                accessible_courses.extend(assistant_courses)
+                
+                # Публичные курсы (статус 'free' или 'published')
+                public_courses = Course.objects.filter(status__in=['free', 'published'])
+                accessible_courses.extend(public_courses)
+                
+                # Убираем дубликаты
+                accessible_course_ids = list(set(course.id for course in accessible_courses))
+                
+                if accessible_course_ids:
+                    qs = qs.filter(course_id__in=accessible_course_ids)
+                else:
+                    # Если у пользователя нет доступных курсов, возвращаем пустой queryset
+                    qs = qs.none()
 
         return qs
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAuthenticated(), IsCourseStaffOrAdminForDict()]
-        return [IsAuthenticated(), CanViewDictionaryContent()]
+        # Для остальных действий проверка доступа уже выполнена в get_queryset
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
         course_pk = self.kwargs.get('course_pk')
@@ -89,15 +127,17 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
                      )
                  )
              )
-             include_learned = self.request.query_params.get('include_learned', '').lower()
-             if include_learned in ['true', '1', 'yes']:
-                 pass  
-             elif include_learned in ['false', '0', 'no']:
-                 queryset = queryset.filter(user_has_learned=False)
-             else:
-                 show_learned = get_user_show_learned_setting(user)
-                 if not show_learned:
+             # Skip filtering out learned entries for mark_learned and unmark_learned actions
+             if self.action not in ['mark_learned', 'unmark_learned']:
+                 include_learned = self.request.query_params.get('include_learned', '').lower()
+                 if include_learned in ['true', '1', 'yes']:
+                     pass  
+                 elif include_learned in ['false', '0', 'no']:
                      queryset = queryset.filter(user_has_learned=False)
+                 else:
+                     show_learned = get_user_show_learned_setting(user)
+                     if not show_learned:
+                         queryset = queryset.filter(user_has_learned=False)
 
         return queryset
 
@@ -106,7 +146,8 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsCourseStaffOrAdminForDict()]
         if self.action in ['mark_learned', 'unmark_learned']:
             return [IsAuthenticated(), CanMarkLearned()]
-        return [IsAuthenticated(), CanViewDictionaryContent()]
+        # Для остальных действий проверка доступа уже выполнена в get_queryset
+        return [IsAuthenticated()]
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -164,7 +205,7 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
         else:
             return Response({"status": "запись не была отмечена как изученная"}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, CanViewDictionaryContent])
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def meta(self, request, section_pk=None):
         section_pk = self.kwargs.get('section_pk')
         user = request.user

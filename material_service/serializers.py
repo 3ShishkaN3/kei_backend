@@ -526,10 +526,17 @@ class DragDropSubmissionAnswerDetailSerializer(serializers.ModelSerializer):
 
 class MCQSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
     selected_options = MCQOptionSerializer(many=True, read_only=True)
+    selected_option_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = MCQSubmissionAnswer
-        fields = ['selected_options']
+        fields = ['selected_options', 'selected_option_ids']
+
+    def get_selected_option_ids(self, obj):
+        try:
+            return list(obj.selected_options.values_list('id', flat=True))
+        except Exception:
+            return []
 
 class FreeTextSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
     class Meta:
@@ -557,7 +564,7 @@ class TestSubmissionDetailSerializer(serializers.ModelSerializer):
     test_details = TestSerializer(source='test', read_only=True)
     student_details = UserSerializer(source='student', read_only=True)
 
-    mcq_answers = MCQSubmissionAnswerOutputSerializer(read_only=True)
+    mcq_answers = MCQSubmissionAnswerOutputSerializer(source='mcq_answers.first', read_only=True)
     free_text_answer = FreeTextSubmissionAnswerOutputSerializer(read_only=True)
     word_order_answer = WordOrderSubmissionAnswerOutputSerializer(read_only=True)
     drag_drop_answers = DragDropSubmissionAnswerDetailSerializer(many=True, read_only=True)

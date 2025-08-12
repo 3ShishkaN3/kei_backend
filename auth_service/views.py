@@ -42,7 +42,6 @@ class CSRFTokenView(APIView):
     Предоставляет CSRF токен для защиты от CSRF атак при работе с API.
     """
     
-    @csrf_exempt
     def get(self, request, *args, **kwargs):
         """Возвращает CSRF токен для текущей сессии."""
         csrf_token = get_token(request)

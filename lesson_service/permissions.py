@@ -56,7 +56,7 @@ class CanViewLessonOrSectionContent(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:
             course_for_public_check = self._get_course_from_obj(obj)
-            if course_for_public_check and hasattr(course_for_public_check, 'is_public') and course_for_public_check.is_public:
+            if course_for_public_check and course_for_public_check.status in ['free', 'published']:
                 return True
             return False
 
@@ -70,7 +70,7 @@ class CanViewLessonOrSectionContent(permissions.BasePermission):
             print(f"CanViewLessonOrSectionContent: Could not determine course from object: {type(obj)}")
             return False
         
-        if hasattr(course, 'is_public') and course.is_public:
+        if course.status in ['free', 'published']:
             return True
 
         is_teacher = CourseTeacher.objects.filter(course=course, teacher=request.user).exists()

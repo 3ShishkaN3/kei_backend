@@ -223,6 +223,11 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "kei_backend.utils": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 

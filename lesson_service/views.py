@@ -56,25 +56,7 @@ class LessonViewSet(viewsets.ModelViewSet):
         return queryset
 
     def retrieve(self, request, *args, **kwargs):
-        """Переопределяем retrieve для отправки события посещения урока"""
-        lesson = self.get_object()
-        user = request.user
-        
-        # Отправляем события посещения всех секций урока
-        try:
-            for section in lesson.sections.all():
-                send_to_kafka('progress_events', {
-                    'type': 'section_visited',
-                    'user_id': user.id,
-                    'section_id': section.id,
-                    'lesson_id': lesson.id,
-                    'course_id': lesson.course.id,
-                    'timestamp': timezone.now().isoformat()
-                })
-        except Exception as e:
-            # Логируем ошибку, но не прерываем выполнение
-            print(f"Ошибка отправки события section_visited: {e}")
-        
+        """Переопределяем retrieve для просмотра урока"""
         return super().retrieve(request, *args, **kwargs)
 
     def perform_create(self, serializer):
@@ -129,13 +111,15 @@ class LessonViewSet(viewsets.ModelViewSet):
         )
 
         if created:
-            send_to_kafka('progress_events', {
+            success = send_to_kafka('progress_events', {
                 'type': 'lesson_completed',
                 'user_id': student.id,
                 'lesson_id': lesson.id,
                 'course_id': lesson.course_id,
                 'timestamp': timezone.now().isoformat()
             })
+            if not success:
+                print(f"Не удалось отправить событие lesson_completed для урока {lesson.id}")
             serializer = LessonCompletionSerializer(completion, context={'request': request})
             return Response(
                 {"success": "Урок успешно завершен.", "details": serializer.data},
@@ -182,44 +166,13 @@ class SectionViewSet(viewsets.ModelViewSet):
         serializer.save(lesson=lesson, order=current_order)
 
     def retrieve(self, request, *args, **kwargs):
-        """Переопределяем retrieve для отправки события посещения секции"""
-        section = self.get_object()
-        user = request.user
-        
-        # Отправляем событие посещения секции
-        try:
-            send_to_kafka('progress_events', {
-                'type': 'section_visited',
-                'user_id': user.id,
-                'section_id': section.id,
-                'lesson_id': section.lesson.id,
-                'course_id': section.lesson.course.id,
-                'timestamp': timezone.now().isoformat()
-            })
-        except Exception as e:
-            # Логируем ошибку, но не прерываем выполнение
-            print(f"Ошибка отправки события section_visited: {e}")
-        
+        """Переопределяем retrieve для просмотра секции"""
         return super().retrieve(request, *args, **kwargs)
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated, CanViewLessonOrSectionContent])
     def completion_status(self, request, lesson_pk=None, pk=None):
         section = self.get_object()
         user = request.user
-        
-        # Отправляем событие посещения секции при проверке статуса
-        try:
-            send_to_kafka('progress_events', {
-                'type': 'section_visited',
-                'user_id': user.id,
-                'section_id': section.id,
-                'lesson_id': section.lesson.id,
-                'course_id': section.lesson.course.id,
-                'timestamp': timezone.now().isoformat()
-            })
-        except Exception as e:
-            # Логируем ошибку, но не прерываем выполнение
-            print(f"Ошибка отправки события section_visited: {e}")
         
         try:
             completion = SectionCompletion.objects.get(section=section, student=user)
@@ -242,7 +195,7 @@ class SectionViewSet(viewsets.ModelViewSet):
             )
 
             if created:
-                send_to_kafka('progress_events', {
+                success = send_to_kafka('progress_events', {
                     'type': 'section_completed',
                     'user_id': student.id,
                     'section_id': section.id,
@@ -250,6 +203,8 @@ class SectionViewSet(viewsets.ModelViewSet):
                     'course_id': lesson.course_id,
                     'timestamp': timezone.now().isoformat()
                 })
+                if not success:
+                    print(f"Не удалось отправить событие section_completed для секции {section.id}")
 
                 total_sections = lesson.sections.count()
                 completed_sections_count = SectionCompletion.objects.filter(
@@ -265,13 +220,15 @@ class SectionViewSet(viewsets.ModelViewSet):
                     )
                     if lesson_created:
                         lesson_completion_created = True
-                        send_to_kafka('progress_events', {
+                        success = send_to_kafka('progress_events', {
                             'type': 'lesson_completed',
                             'user_id': student.id,
                             'lesson_id': lesson.id,
                             'course_id': lesson.course_id,
                             'timestamp': timezone.now().isoformat()
                         })
+                        if not success:
+                            print(f"Не удалось отправить событие lesson_completed для урока {lesson.id}")
 
                 serializer = SectionCompletionSerializer(completion, context={'request': request})
                 response_data = {"success": "Раздел успешно завершен.", "details": serializer.data}
@@ -407,21 +364,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет доступа к этому разделю.")
         
-        # Отправляем событие посещения секции при запросе элементов
-        user = self.request.user
-        try:
-            send_to_kafka('progress_events', {
-                'type': 'section_visited',
-                'user_id': user.id,
-                'section_id': section.id,
-                'lesson_id': section.lesson.id,
-                'course_id': section.lesson.course.id,
-                'timestamp': timezone.now().isoformat()
-            })
-        except Exception as e:
-            # Логируем ошибку, но не прерываем выполнение
-            print(f"Ошибка отправки события section_visited: {e}")
-                                   
         return SectionItem.objects.filter(section=section).select_related('content_type').order_by('order')
 
     def get_permissions(self):
@@ -444,6 +386,46 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет прав на изменение содержимого этого раздела.")
         return section
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanViewLessonOrSectionContent])
+    def viewed(self, request, course_pk=None, lesson_pk=None, section_pk=None, pk=None):
+        """Отметить элемент раздела как просмотренный (для нетестовых материалов).
+        Паблишит событие material_viewed в Kafka. Идемпотентно на стороне консюмера.
+        """
+        section = get_object_or_404(
+            Section.objects.select_related('lesson__course'),
+            pk=section_pk,
+            lesson_id=lesson_pk,
+            lesson__course_id=course_pk
+        )
+        if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, section.lesson.course):
+            self.permission_denied(self.request, message="У вас нет доступа к этому разделу.")
+
+        # Получаем сам item из queryset viewset-а
+        item = get_object_or_404(
+            SectionItem.objects.select_related('section'),
+            pk=pk,
+            section=section
+        )
+        # Для тестов не отмечаем просмотр — у них отдельная логика
+        if item.item_type == 'test':
+            return Response({"detail": "Для тестов просмотр не фиксируется этим методом."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        success = send_to_kafka('progress_events', {
+            'type': 'material_viewed',
+            'user_id': user.id,
+            'section_item_id': item.id,
+            'section_id': item.section.id,
+            'lesson_id': item.section.lesson.id,
+            'course_id': item.section.lesson.course.id,
+            'item_type': item.item_type,
+            'timestamp': timezone.now().isoformat()
+        })
+        if not success:
+            print(f"Не удалось отправить событие material_viewed для элемента {item.id}")
+
+        return Response({"success": True}, status=status.HTTP_200_OK)
 
     def perform_create(self, serializer):
         section = self._get_section_for_write_operations()

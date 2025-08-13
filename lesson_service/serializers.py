@@ -1,5 +1,6 @@
 import json
 from rest_framework import serializers
+import requests
 from .models import Lesson, Section, SectionCompletion, LessonCompletion, SectionItem
 from auth_service.serializers import UserSerializer
 from material_service.serializers import (
@@ -23,6 +24,7 @@ CONTENT_TYPE_MAP = {
 
 class SectionItemSerializer(serializers.ModelSerializer):
     content_details = serializers.SerializerMethodField(read_only=True)
+    is_completed = serializers.SerializerMethodField(read_only=True)
     content_data = serializers.JSONField(write_only=True, required=False, allow_null=True,
                                          help_text="JSON-объект с данными для создания нового контента (текста, теста и т.д.) или метаданные для файлов.")
     existing_content_type = serializers.CharField(write_only=True, required=False, allow_null=True, help_text="Тип существующего контента (напр., 'text', 'test')")
@@ -32,7 +34,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
         model = SectionItem
         fields = [
             'id', 'section', 'order', 'item_type',
-            'content_details',
+            'content_details', 'is_completed',
             'content_data', 'existing_content_type', 'existing_content_id',
             'created_at', 'updated_at',
         ]
@@ -94,6 +96,50 @@ class SectionItemSerializer(serializers.ModelSerializer):
                     print(f"Error serializing content for item {obj.id} (type: {item_type}): {e}")
                     return {"error": "Could not serialize content details."}
         return None
+
+    def get_is_completed(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return False
+        try:
+            base_url = request.build_absolute_uri('/api/v1/progress/')
+            headers = {}
+            csrf = request.COOKIES.get('csrftoken')
+            if csrf:
+                headers['X-CSRFTOKEN'] = csrf
+            # Тесты: проверяем статусы по TestProgress
+            if obj.item_type == 'test':
+                lesson_id = obj.section.lesson.id
+                tests_url = f"{base_url}tests/?lesson_id={lesson_id}"
+                resp = requests.get(tests_url, headers=headers, cookies=request.COOKIES, timeout=3)
+                if resp.status_code != 200:
+                    return False
+                data = resp.json()
+                results = data.get('results', data if isinstance(data, list) else [])
+                for entry in results:
+                    # В TestProgress модель поле называется test_id
+                    if int(entry.get('test_id', 0)) == int(obj.object_id):
+                        return (entry.get('status') or '').lower() == 'passed'
+                return False
+            # Прочие материалы: считаем завершенными при завершении секции (или 100% прогресса секции)
+            section_url = f"{base_url}sections/?section_id={obj.section.id}"
+            s_resp = requests.get(section_url, headers=headers, cookies=request.COOKIES, timeout=3)
+            if s_resp.status_code != 200:
+                return False
+            s_data = s_resp.json()
+            s_results = s_data.get('results', s_data if isinstance(s_data, list) else [])
+            if not s_results:
+                return False
+            s_entry = s_results[0]
+            completion = float(s_entry.get('completion_percentage', 0))
+            if completion >= 99.5:
+                return True
+            # Если в секции нет тестов и секция посещена — считаем материалы изученными
+            if s_entry.get('total_tests', 0) == 0 and s_entry.get('is_visited'):
+                return True
+            return False
+        except Exception:
+            return False
 
     def validate(self, attrs):
         raw_initial_data = self.initial_data
@@ -216,10 +262,38 @@ class SectionSerializer(serializers.ModelSerializer):
         read_only_fields = ['lesson', 'created_at', 'updated_at', 'is_completed', 'items']
 
     def get_is_completed(self, obj):
-        user = self.context['request'].user
-        if user and user.is_authenticated:
-            return SectionCompletion.objects.filter(section=obj, student=user).exists()
-        return False
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return False
+        try:
+            base_url = request.build_absolute_uri('/api/v1/progress/')
+            url = f"{base_url}sections/?section_id={obj.id}"
+            headers = {}
+            csrf = request.COOKIES.get('csrftoken')
+            if csrf:
+                headers['X-CSRFTOKEN'] = csrf
+            # Пробрасываем куки сессии пользователя для аутентификации
+            resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            # API может вернуть {results: [...]} или массив
+            results = data.get('results', data if isinstance(data, list) else [])
+            if not results:
+                return False
+            entry = results[0]
+            completion = float(entry.get('completion_percentage', 0))
+            if completion >= 99.5:
+                return True
+            # Альтернативный флажок завершения
+            if entry.get('completed_at'):
+                return True
+            # Если тестов нет — в progress_service секция завершена при посещении
+            if entry.get('total_tests', 0) == 0 and entry.get('is_visited'):
+                return True
+            return False
+        except Exception:
+            return False
 
     def validate_order(self, value):
         if value < 0:
@@ -231,16 +305,41 @@ class LessonListSerializer(serializers.ModelSerializer):
     created_by_name = serializers.ReadOnlyField(source='created_by.username')
     section_count = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
+    completion_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
         fields = [
             'id', 'title', 'cover_image', 'course_id',
-            'created_by_name', 'created_at', 'updated_at', 'section_count'
+            'created_by_name', 'created_at', 'updated_at', 'section_count',
+            'completion_percentage'
         ]
 
     def get_section_count(self, obj):
         return obj.sections.count()
+
+    def get_completion_percentage(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return 0
+        try:
+            base_url = request.build_absolute_uri('/api/v1/progress/')
+            url = f"{base_url}lessons/?lesson_id={obj.id}"
+            headers = {}
+            csrf = request.COOKIES.get('csrftoken')
+            if csrf:
+                headers['X-CSRFTOKEN'] = csrf
+            resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
+            if resp.status_code != 200:
+                return 0
+            data = resp.json()
+            results = data.get('results', data if isinstance(data, list) else [])
+            if not results:
+                return 0
+            entry = results[0]
+            return float(entry.get('completion_percentage', 0))
+        except Exception:
+            return 0
 
 
 class LessonDetailSerializer(serializers.ModelSerializer):
@@ -248,21 +347,68 @@ class LessonDetailSerializer(serializers.ModelSerializer):
     sections = SectionSerializer(many=True, read_only=True)
     is_completed = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
+    completion_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
         fields = [
             'id', 'course_id', 'title', 'cover_image',
-            'created_by', 'created_at', 'updated_at', 'sections', 'is_completed'
+            'created_by', 'created_at', 'updated_at', 'sections', 'is_completed',
+            'completion_percentage'
         ]
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id')
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage')
 
 
     def get_is_completed(self, obj):
-        user = self.context['request'].user
-        if user and user.is_authenticated:
-            return LessonCompletion.objects.filter(lesson=obj, student=user).exists()
-        return False
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return False
+        try:
+            base_url = request.build_absolute_uri('/api/v1/progress/')
+            url = f"{base_url}lessons/?lesson_id={obj.id}"
+            headers = {}
+            csrf = request.COOKIES.get('csrftoken')
+            if csrf:
+                headers['X-CSRFTOKEN'] = csrf
+            resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            results = data.get('results', data if isinstance(data, list) else [])
+            if not results:
+                return False
+            entry = results[0]
+            completion = float(entry.get('completion_percentage', 0))
+            if completion >= 99.5:
+                return True
+            if entry.get('completed_at'):
+                return True
+            return False
+        except Exception:
+            return False
+
+    def get_completion_percentage(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return 0
+        try:
+            base_url = request.build_absolute_uri('/api/v1/progress/')
+            url = f"{base_url}lessons/?lesson_id={obj.id}"
+            headers = {}
+            csrf = request.COOKIES.get('csrftoken')
+            if csrf:
+                headers['X-CSRFTOKEN'] = csrf
+            resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
+            if resp.status_code != 200:
+                return 0
+            data = resp.json()
+            results = data.get('results', data if isinstance(data, list) else [])
+            if not results:
+                return 0
+            entry = results[0]
+            return float(entry.get('completion_percentage', 0))
+        except Exception:
+            return 0
 
 class SectionCompletionSerializer(serializers.ModelSerializer):
     student_details = UserSerializer(source='student', read_only=True)

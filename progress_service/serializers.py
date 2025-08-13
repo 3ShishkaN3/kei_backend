@@ -56,13 +56,14 @@ class SectionProgressSerializer(serializers.ModelSerializer):
     """Сериализатор для прогресса по секциям"""
     username = serializers.CharField(source='user.username', read_only=True)
     section_title = serializers.CharField(source='section.title', read_only=True)
+    section_id = serializers.IntegerField(source='section.id', read_only=True)
     lesson_title = serializers.CharField(source='section.lesson.title', read_only=True)
     course_title = serializers.CharField(source='section.lesson.course.title', read_only=True)
     
     class Meta:
         model = SectionProgress
         fields = [
-            'id', 'username', 'section_title', 'lesson_title', 'course_title',
+            'id', 'username', 'section_id', 'section_title', 'lesson_title', 'course_title',
             'total_items', 'completed_items', 'total_tests', 'passed_tests', 'failed_tests',
             'completion_percentage', 'is_visited', 'visited_at', 'started_at', 'completed_at',
             'last_activity', 'created_at', 'updated_at'

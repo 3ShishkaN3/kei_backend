@@ -292,29 +292,28 @@ class TestViewSet(BaseMaterialViewSet):
             return Response({"detail": f"Произошла внутренняя ошибка при сохранении ответа: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if submission_instance:
-            try:
-                lesson = section_item.section.lesson
-                course = lesson.course
-                kafka_data = {
-                    'type': 'test_submitted', 
-                    'user_id': student.id, 
-                    'submission_id': submission_instance.id,
-                    'test_id': test_instance.id, 
-                    'test_title': test_instance.title,
-                    'test_type': test_instance.test_type,
-                    'section_item_id': section_item.id,
-                    'section_id': section_item.section.id,
-                    'section_title': section_item.section.title,
-                    'lesson_id': lesson.id,
-                    'lesson_title': lesson.title,
-                    'course_id': course.id,
-                    'course_title': course.title,
-                    'timestamp': submission_instance.submitted_at.isoformat(), 
-                    'status': submission_instance.status,
-                }
-                send_to_kafka('progress_events', kafka_data)
-            except Exception as e:
-                 print(f"Error sending Kafka event for submission {submission_instance.id}: {e}")
+            lesson = section_item.section.lesson
+            course = lesson.course
+            kafka_data = {
+                'type': 'test_submitted', 
+                'user_id': student.id, 
+                'submission_id': submission_instance.id,
+                'test_id': test_instance.id, 
+                'test_title': test_instance.title,
+                'test_type': test_instance.test_type,
+                'section_item_id': section_item.id,
+                'section_id': section_item.section.id,
+                'section_title': section_item.section.title,
+                'lesson_id': lesson.id,
+                'lesson_title': lesson.title,
+                'course_id': course.id,
+                'course_title': course.title,
+                'timestamp': submission_instance.submitted_at.isoformat(), 
+                'status': submission_instance.status,
+            }
+            success = send_to_kafka('progress_events', kafka_data)
+            if not success:
+                print(f"Error sending Kafka event for submission {submission_instance.id}")
 
         response_serializer_context = self.get_serializer_context()
         response_serializer_context['test'] = test_instance

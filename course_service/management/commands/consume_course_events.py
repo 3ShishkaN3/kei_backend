@@ -3,18 +3,25 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from course_service.models import Course, CourseEnrollment
 from kafka import KafkaConsumer
+from decouple import config
 
 class Command(BaseCommand):
     help = "Прослушивание событий из Kafka от сервисов, связанных с курсами"
 
     def handle(self, *args, **options):
+        # Используем правильный адрес Kafka для Docker среды
+        bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=lambda v: [s.strip() for s in v.split(',')])
+        
         consumer = KafkaConsumer(
             'course_events', 
-            bootstrap_servers=['localhost:9092'],
+            bootstrap_servers=bootstrap_servers,
             auto_offset_reset='earliest',
-            value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+            # Добавляем таймауты
+            session_timeout_ms=30000,
+            heartbeat_interval_ms=3000
         )
-        self.stdout.write(self.style.SUCCESS("Начало прослушивания топика 'course_events'..."))
+        self.stdout.write(self.style.SUCCESS(f"Начало прослушивания топика 'course_events' с серверами: {bootstrap_servers}..."))
         for message in consumer:
             data = message.value
             event_type = data.get('type')

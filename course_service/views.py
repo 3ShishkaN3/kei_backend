@@ -254,12 +254,14 @@ class CourseViewSet(viewsets.ModelViewSet):
             enrollment.completed_at = timezone.now()
             enrollment.save()
             
-            send_to_kafka('course_events', {
+            success = send_to_kafka('course_events', {
                 'type': 'course_completed',
                 'user_id': student.id,
                 'course_id': course.id,
                 'timestamp': timezone.now().isoformat()
             })
+            if not success:
+                print(f"Не удалось отправить событие course_completed для курса {course.id}")
             
             return Response({"success": "Курс успешно завершён для ученика"})
         except CourseEnrollment.DoesNotExist:

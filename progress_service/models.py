@@ -211,6 +211,28 @@ class TestProgress(models.Model):
         return f"{self.user.username} - {self.test_title} ({self.status})"
 
 
+class SectionItemView(models.Model):
+    """Фиксация факта просмотра нетестового элемента раздела"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='section_item_views',
+        verbose_name="Пользователь"
+    )
+    section_id = models.PositiveIntegerField(verbose_name="ID раздела")
+    section_item_id = models.PositiveIntegerField(verbose_name="ID элемента раздела")
+    viewed_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата первого просмотра")
+    last_viewed_at = models.DateTimeField(auto_now=True, verbose_name="Дата последнего просмотра")
+
+    class Meta:
+        verbose_name = "Просмотр элемента раздела"
+        verbose_name_plural = "Просмотры элементов раздела"
+        unique_together = ('user', 'section_item_id')
+
+    def __str__(self):
+        return f"{self.user.username} просмотрел элемент {self.section_item_id} (секция {self.section_id})"
+
+
 class LearningStats(models.Model):
     """Статистика обучения"""
     user = models.OneToOneField(

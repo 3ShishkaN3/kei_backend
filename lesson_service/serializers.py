@@ -107,30 +107,40 @@ class SectionItemSerializer(serializers.ModelSerializer):
             csrf = request.COOKIES.get('csrftoken')
             if csrf:
                 headers['X-CSRFTOKEN'] = csrf
-            # Тесты: проверяем статусы по TestProgress
+            cache = self.context.setdefault('_progress_cache', {})
+            # Кэш по тестам на уровне урока
             if obj.item_type == 'test':
                 lesson_id = obj.section.lesson.id
-                tests_url = f"{base_url}tests/?lesson_id={lesson_id}"
-                resp = requests.get(tests_url, headers=headers, cookies=request.COOKIES, timeout=3)
-                if resp.status_code != 200:
+                tests_cache = cache.setdefault('tests_by_lesson', {})
+                mapping = tests_cache.get(lesson_id)
+                if mapping is None:
+                    tests_url = f"{base_url}tests/?lesson_id={lesson_id}"
+                    resp = requests.get(tests_url, headers=headers, cookies=request.COOKIES, timeout=3)
+                    if resp.status_code != 200:
+                        tests_cache[lesson_id] = {}
+                        return False
+                    data = resp.json()
+                    results = data.get('results', data if isinstance(data, list) else [])
+                    mapping = {int(e.get('test_id', 0)): (e.get('status') or '').lower() for e in results}
+                    tests_cache[lesson_id] = mapping
+                status = mapping.get(int(obj.object_id))
+                return status == 'passed'
+            # Для нетестовых элементов используем кэш секций
+            section_cache = cache.setdefault('sections', {})
+            s_entry = section_cache.get(obj.section.id)
+            if s_entry is None:
+                section_url = f"{base_url}sections/?section_id={obj.section.id}"
+                s_resp = requests.get(section_url, headers=headers, cookies=request.COOKIES, timeout=3)
+                if s_resp.status_code != 200:
+                    section_cache[obj.section.id] = None
                     return False
-                data = resp.json()
-                results = data.get('results', data if isinstance(data, list) else [])
-                for entry in results:
-                    # В TestProgress модель поле называется test_id
-                    if int(entry.get('test_id', 0)) == int(obj.object_id):
-                        return (entry.get('status') or '').lower() == 'passed'
-                return False
-            # Прочие материалы: считаем завершенными при завершении секции (или 100% прогресса секции)
-            section_url = f"{base_url}sections/?section_id={obj.section.id}"
-            s_resp = requests.get(section_url, headers=headers, cookies=request.COOKIES, timeout=3)
-            if s_resp.status_code != 200:
-                return False
-            s_data = s_resp.json()
-            s_results = s_data.get('results', s_data if isinstance(s_data, list) else [])
-            if not s_results:
-                return False
-            s_entry = s_results[0]
+                s_data = s_resp.json()
+                s_results = s_data.get('results', s_data if isinstance(s_data, list) else [])
+                if not s_results:
+                    section_cache[obj.section.id] = None
+                    return False
+                s_entry = s_results[0]
+                section_cache[obj.section.id] = s_entry
             completion = float(s_entry.get('completion_percentage', 0))
             if completion >= 99.5:
                 return True
@@ -266,22 +276,27 @@ class SectionSerializer(serializers.ModelSerializer):
         if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
             return False
         try:
-            base_url = request.build_absolute_uri('/api/v1/progress/')
-            url = f"{base_url}sections/?section_id={obj.id}"
-            headers = {}
-            csrf = request.COOKIES.get('csrftoken')
-            if csrf:
-                headers['X-CSRFTOKEN'] = csrf
-            # Пробрасываем куки сессии пользователя для аутентификации
-            resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
-            if resp.status_code != 200:
-                return False
-            data = resp.json()
-            # API может вернуть {results: [...]} или массив
-            results = data.get('results', data if isinstance(data, list) else [])
-            if not results:
-                return False
-            entry = results[0]
+            cache = self.context.setdefault('_progress_cache', {})
+            section_cache = cache.setdefault('sections', {})
+            entry = section_cache.get(obj.id)
+            if entry is None:
+                base_url = request.build_absolute_uri('/api/v1/progress/')
+                url = f"{base_url}sections/?section_id={obj.id}"
+                headers = {}
+                csrf = request.COOKIES.get('csrftoken')
+                if csrf:
+                    headers['X-CSRFTOKEN'] = csrf
+                resp = requests.get(url, headers=headers, cookies=request.COOKIES, timeout=3)
+                if resp.status_code != 200:
+                    section_cache[obj.id] = None
+                    return False
+                data = resp.json()
+                results = data.get('results', data if isinstance(data, list) else [])
+                if not results:
+                    section_cache[obj.id] = None
+                    return False
+                entry = results[0]
+                section_cache[obj.id] = entry
             completion = float(entry.get('completion_percentage', 0))
             if completion >= 99.5:
                 return True

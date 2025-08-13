@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import UserProgress, CourseProgress, LessonProgress, TestProgress, LearningStats
+from .models import UserProgress, CourseProgress, LessonProgress, SectionProgress, TestProgress, LearningStats
 
 
 class UserProgressSerializer(serializers.ModelSerializer):
@@ -48,6 +48,24 @@ class LessonProgressSerializer(serializers.ModelSerializer):
             'completed_sections', 'total_tests', 'passed_tests', 'failed_tests',
             'completion_percentage', 'started_at', 'completed_at', 'last_activity',
             'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+
+class SectionProgressSerializer(serializers.ModelSerializer):
+    """Сериализатор для прогресса по секциям"""
+    username = serializers.CharField(source='user.username', read_only=True)
+    section_title = serializers.CharField(source='section.title', read_only=True)
+    lesson_title = serializers.CharField(source='section.lesson.title', read_only=True)
+    course_title = serializers.CharField(source='section.lesson.course.title', read_only=True)
+    
+    class Meta:
+        model = SectionProgress
+        fields = [
+            'id', 'username', 'section_title', 'lesson_title', 'course_title',
+            'total_items', 'completed_items', 'total_tests', 'passed_tests', 'failed_tests',
+            'completion_percentage', 'is_visited', 'visited_at', 'started_at', 'completed_at',
+            'last_activity', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
 

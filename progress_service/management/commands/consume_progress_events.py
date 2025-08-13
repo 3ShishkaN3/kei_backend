@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from progress_service.models import (
-    UserProgress, CourseProgress, LessonProgress, TestProgress, LearningStats
+    UserProgress, CourseProgress, LessonProgress, SectionProgress, TestProgress, LearningStats
 )
 from course_service.models import Course, CourseEnrollment
 from lesson_service.models import Lesson, Section
@@ -45,6 +45,8 @@ class Command(BaseCommand):
                         self.handle_lesson_completed(data, user)
                     elif event_type == 'section_completed':
                         self.handle_section_completed(data, user)
+                    elif event_type == 'section_visited':
+                        self.handle_section_visited(data, user)
                     elif event_type == 'test_submitted':
                         self.handle_test_submitted(data, user)
                     else:
@@ -142,6 +144,54 @@ class Command(BaseCommand):
         
         self.stdout.write(f"Прогресс по разделу {section_id} обновлен для пользователя {user.username}")
 
+    def handle_section_visited(self, data, user):
+        """Обработка посещения секции"""
+        section_id = data.get('section_id')
+        lesson_id = data.get('lesson_id')
+        course_id = data.get('course_id')
+        
+        try:
+            section = Section.objects.get(pk=section_id)
+        except Section.DoesNotExist:
+            self.stdout.write(f"Секция с id {section_id} не найдена")
+            return
+        
+        # Создаем или обновляем прогресс по секции
+        section_progress, created = SectionProgress.objects.get_or_create(
+            user=user,
+            section=section,
+            defaults={
+                'total_items': section.items.count(),
+                'total_tests': section.items.filter(item_type='test').count(),
+                'is_visited': True,
+                'visited_at': timezone.now(),
+                'last_activity': timezone.now()
+            }
+        )
+        
+        if not created:
+            section_progress.is_visited = True
+            section_progress.visited_at = timezone.now()
+            section_progress.last_activity = timezone.now()
+            
+            # Если в секции нет тестов, автоматически отмечаем как завершенную
+            if section.items.filter(item_type='test').count() == 0:
+                section_progress.completion_percentage = 100.00
+                section_progress.completed_at = timezone.now()
+            
+            section_progress.save()
+        
+        # Обновляем прогресс по уроку
+        self.update_lesson_progress(user, lesson_id)
+        
+        # Обновляем прогресс по курсу
+        self.update_course_progress(user, course_id)
+        
+        # Обновляем общий прогресс пользователя
+        self.update_user_progress(user)
+        
+        self.stdout.write(f"Секция {section_id} отмечена как посещенная для пользователя {user.username}")
+
     def handle_test_submitted(self, data, user):
         """Обработка отправки теста"""
         test_id = data.get('test_id')
@@ -183,11 +233,17 @@ class Command(BaseCommand):
             
             test_progress.save()
         
-        # Обновляем общий прогресс пользователя
-        self.update_user_progress(user)
+        # Обновляем прогресс по секции
+        self.update_section_progress(user, section_id)
+        
+        # Обновляем прогресс по уроку
+        self.update_lesson_progress(user, lesson_id)
         
         # Обновляем прогресс по курсу
         self.update_course_progress(user, course_id)
+        
+        # Обновляем общий прогресс пользователя
+        self.update_user_progress(user)
         
         self.stdout.write(f"Прогресс по тесту {test_id} обновлен для пользователя {user.username}")
 
@@ -216,8 +272,8 @@ class Command(BaseCommand):
             user=user, completion_percentage=100
         ).count()
         
-        progress.total_sections_completed = Section.objects.filter(
-            completions__student=user
+        progress.total_sections_completed = SectionProgress.objects.filter(
+            user=user, completion_percentage=100
         ).count()
         
         progress.total_tests_passed = TestProgress.objects.filter(
@@ -229,6 +285,96 @@ class Command(BaseCommand):
         ).count()
         
         progress.save()
+
+    def update_section_progress(self, user, section_id):
+        """Обновление прогресса по секции"""
+        try:
+            section = Section.objects.get(pk=section_id)
+        except Section.DoesNotExist:
+            return
+        
+        section_progress, created = SectionProgress.objects.get_or_create(
+            user=user,
+            section=section,
+            defaults={
+                'total_items': section.items.count(),
+                'total_tests': section.items.filter(item_type='test').count(),
+                'last_activity': timezone.now()
+            }
+        )
+        
+        if not created:
+            section_progress.last_activity = timezone.now()
+        
+        # Подсчитываем статистику по секции
+        section_progress.total_items = section.items.count()
+        section_progress.total_tests = section.items.filter(item_type='test').count()
+        
+        # Подсчитываем пройденные тесты
+        passed_tests = TestProgress.objects.filter(
+            user=user, section_id=section_id, status='passed'
+        ).count()
+        
+        failed_tests = TestProgress.objects.filter(
+            user=user, section_id=section_id, status='failed'
+        ).count()
+        
+        section_progress.passed_tests = passed_tests
+        section_progress.failed_tests = failed_tests
+        
+        # Рассчитываем процент завершения
+        if section_progress.total_tests > 0:
+            # Если есть тесты, рассчитываем по формуле: пройденные тесты / все тесты
+            section_progress.completion_percentage = (passed_tests / section_progress.total_tests) * 100
+        else:
+            # Если тестов нет, секция считается завершенной при посещении
+            section_progress.completion_percentage = 100.00 if section_progress.is_visited else 0.00
+        
+        # Если секция завершена, устанавливаем дату завершения
+        if section_progress.completion_percentage >= 100 and not section_progress.completed_at:
+            section_progress.completed_at = timezone.now()
+        
+        section_progress.save()
+
+    def update_lesson_progress(self, user, lesson_id):
+        """Обновление прогресса по уроку"""
+        try:
+            lesson = Lesson.objects.get(pk=lesson_id)
+        except Lesson.DoesNotExist:
+            return
+        
+        lesson_progress, created = LessonProgress.objects.get_or_create(
+            user=user,
+            lesson=lesson,
+            defaults={
+                'last_activity': timezone.now()
+            }
+        )
+        
+        if not created:
+            lesson_progress.last_activity = timezone.now()
+        
+        # Подсчитываем статистику по уроку
+        lesson_progress.total_sections = lesson.sections.count()
+        
+        # Подсчитываем завершенные секции
+        completed_sections = SectionProgress.objects.filter(
+            user=user, section__lesson=lesson, completion_percentage=100
+        ).count()
+        
+        lesson_progress.completed_sections = completed_sections
+        
+        # Рассчитываем процент завершения: завершенные секции / все секции
+        if lesson_progress.total_sections > 0:
+            lesson_progress.completion_percentage = (completed_sections / lesson_progress.total_sections) * 100
+        else:
+            lesson_progress.completion_percentage = 0.00
+        
+        # Если урок завершен, устанавливаем дату завершения
+        if lesson_progress.completion_percentage >= 100 and not lesson_progress.completed_at:
+            lesson_progress.completed_at = timezone.now()
+        
+        lesson_progress.save()
 
     def update_course_progress(self, user, course_id):
         """Обновление прогресса по курсу"""
@@ -254,32 +400,9 @@ class Command(BaseCommand):
             user=user, lesson__course=course, completion_percentage=100
         ).count()
         
-        course_progress.total_sections = Section.objects.filter(
-            lesson__course=course
-        ).count()
-        
-        course_progress.completed_sections = Section.objects.filter(
-            lesson__course=course, completions__student=user
-        ).count()
-        
-        course_progress.total_tests = TestProgress.objects.filter(
-            user=user, course_id=course_id
-        ).count()
-        
-        course_progress.passed_tests = TestProgress.objects.filter(
-            user=user, course_id=course_id, status='passed'
-        ).count()
-        
-        course_progress.failed_tests = TestProgress.objects.filter(
-            user=user, course_id=course_id, status='failed'
-        ).count()
-        
-        # Рассчитываем процент завершения
-        total_items = course_progress.total_lessons + course_progress.total_sections + course_progress.total_tests
-        completed_items = course_progress.completed_lessons + course_progress.completed_sections + course_progress.passed_tests
-        
-        if total_items > 0:
-            course_progress.completion_percentage = (completed_items / total_items) * 100
+        # Рассчитываем процент завершения: завершенные уроки / все уроки
+        if course_progress.total_lessons > 0:
+            course_progress.completion_percentage = (course_progress.completed_lessons / course_progress.total_lessons) * 100
         else:
             course_progress.completion_percentage = 0.00
         

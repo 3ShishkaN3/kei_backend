@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import UserProgress, CourseProgress, LessonProgress, TestProgress, LearningStats
+from .models import UserProgress, CourseProgress, LessonProgress, SectionProgress, TestProgress, LearningStats
 
 
 @admin.register(UserProgress)
@@ -29,6 +29,16 @@ class LessonProgressAdmin(admin.ModelAdmin):
                    'passed_tests', 'failed_tests', 'last_activity']
     list_filter = ['completion_percentage', 'started_at', 'completed_at', 'last_activity']
     search_fields = ['user__username', 'lesson__title', 'lesson__course__title']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-last_activity']
+
+
+@admin.register(SectionProgress)
+class SectionProgressAdmin(admin.ModelAdmin):
+    list_display = ['user', 'section', 'completion_percentage', 'is_visited', 
+                   'total_items', 'completed_items', 'total_tests', 'passed_tests', 'last_activity']
+    list_filter = ['completion_percentage', 'is_visited', 'started_at', 'completed_at', 'last_activity']
+    search_fields = ['user__username', 'section__title', 'section__lesson__title']
     readonly_fields = ['created_at', 'updated_at']
     ordering = ['-last_activity']
 

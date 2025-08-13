@@ -6,11 +6,11 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from .models import UserProgress, CourseProgress, LessonProgress, TestProgress, LearningStats
+from .models import UserProgress, CourseProgress, LessonProgress, SectionProgress, TestProgress, LearningStats
 from .serializers import (
     UserProgressSerializer, CourseProgressSerializer, LessonProgressSerializer,
-    TestProgressSerializer, LearningStatsSerializer, LeaderboardEntrySerializer,
-    ProgressSummarySerializer
+    SectionProgressSerializer, TestProgressSerializer, LearningStatsSerializer, 
+    LeaderboardEntrySerializer, ProgressSummarySerializer
 )
 from .permissions import CanViewOwnProgress, CanViewStudentProgress, CanViewCourseProgress, CanViewLeaderboard
 from course_service.models import Course, CourseTeacher, CourseAssistant
@@ -228,6 +228,56 @@ class LessonProgressViewSet(viewsets.ReadOnlyModelViewSet):
         lesson_id = self.request.query_params.get('lesson_id')
         if lesson_id:
             queryset = queryset.filter(lesson_id=lesson_id)
+        
+        return queryset
+
+
+class SectionProgressViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet для прогресса по секциям"""
+    serializer_class = SectionProgressSerializer
+    permission_classes = [IsAuthenticated, CanViewCourseProgress]
+    pagination_class = ProgressPagination
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['completion_percentage', 'started_at', 'completed_at', 'last_activity', 'visited_at']
+    ordering = ['-last_activity']
+
+    def get_queryset(self):
+        user = self.request.user
+        
+        if user.role == 'admin':
+            queryset = SectionProgress.objects.all()
+        elif user.role in ['teacher', 'assistant']:
+            # Преподаватели и помощники видят прогресс по своим курсам
+            if user.role == 'teacher':
+                managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
+            else:
+                managed_courses = CourseAssistant.objects.filter(assistant=user).values_list('course_id', flat=True)
+            
+            queryset = SectionProgress.objects.filter(section__lesson__course_id__in=managed_courses)
+        else:
+            # Студенты видят только свой прогресс
+            queryset = SectionProgress.objects.filter(user=user)
+        
+        # Фильтрация по курсу
+        course_id = self.request.query_params.get('course_id')
+        if course_id:
+            queryset = queryset.filter(section__lesson__course_id=course_id)
+        
+        # Фильтрация по уроку
+        lesson_id = self.request.query_params.get('lesson_id')
+        if lesson_id:
+            queryset = queryset.filter(section__lesson_id=lesson_id)
+        
+        # Фильтрация по секции
+        section_id = self.request.query_params.get('section_id')
+        if section_id:
+            queryset = queryset.filter(section_id=section_id)
+        
+        # Фильтрация по статусу посещения
+        visited = self.request.query_params.get('visited')
+        if visited is not None:
+            visited_bool = visited.lower() == 'true'
+            queryset = queryset.filter(is_visited=visited_bool)
         
         return queryset
 

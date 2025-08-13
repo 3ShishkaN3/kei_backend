@@ -4,6 +4,7 @@ import psycopg2
 import sqlite3
 import django
 import shutil
+from django.utils import timezone
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kei_backend'))
 
@@ -1060,6 +1061,471 @@ def migrate_test_submissions(sqlite_conn):
     print(f"Миграция ответов пользователей завершена. Создано {submission_count} записей.")
 
 
+def migrate_progress_service(sqlite_conn):
+    """Миграция прогресса пользователей из старой БД"""
+    print("\nНачинаю миграцию progress_service...")
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    from progress_service.models import (
+        UserProgress, CourseProgress, LessonProgress, 
+        SectionProgress, TestProgress, LearningStats
+    )
+    from course_service.models import CourseEnrollment
+    from lesson_service.models import Section
+    from material_service.models import Test
+    
+    # Получаем всех пользователей-студентов
+    students = User.objects.filter(role=User.Role.STUDENT)
+    
+    for student in students:
+        print(f"\nОбрабатываю прогресс для пользователя {student.username} (ID: {student.id})")
+        
+        # Создаем или получаем общий прогресс пользователя
+        user_progress, created = UserProgress.objects.get_or_create(
+            user=student,
+            defaults={'last_activity': timezone.now()}
+        )
+        
+        # Создаем или получаем статистику обучения
+        learning_stats, created = LearningStats.objects.get_or_create(
+            user=student,
+            defaults={'level': 1, 'experience_points': 0}
+        )
+        
+        # Мигрируем прогресс по тестам
+        migrate_user_test_progress(sqlite_cursor, student, user_progress)
+        
+        # Мигрируем прогресс по секциям
+        migrate_user_section_progress(sqlite_cursor, student, user_progress)
+        
+        # Мигрируем прогресс по урокам
+        migrate_user_lesson_progress(sqlite_cursor, student, user_progress)
+        
+        # Мигрируем прогресс по курсам
+        migrate_user_course_progress(sqlite_cursor, student, user_progress)
+        
+        # Обновляем общую статистику пользователя
+        update_user_overall_progress(student, user_progress)
+        
+        print(f"Прогресс для пользователя {student.username} обработан")
+
+
+def migrate_user_test_progress(sqlite_cursor, user, user_progress):
+    """Миграция прогресса по тестам для конкретного пользователя"""
+    print(f"  Мигрирую прогресс по тестам для {user.username}")
+    
+    from progress_service.models import TestProgress
+    from material_service.models import Test
+    from lesson_service.models import Section, SectionItem
+    from django.contrib.contenttypes.models import ContentType
+    
+    # Получаем все пройденные тесты пользователя из старой БД
+    # Используем kei_school_useranswers, где test_id ссылается на kei_school_testtype (тесты)
+    sqlite_cursor.execute("""
+        SELECT 
+            ua.test_id as testtype_id,
+            ua.is_complete,
+            tt.type as test_type,
+            tt.ask as test_question,
+            tt.test_id as section_test_id,
+            t.name as section_name,
+            t.lesson_id
+        FROM kei_school_useranswers ua
+        JOIN kei_school_testtype tt ON ua.test_id = tt.id
+        JOIN kei_school_test t ON tt.test_id = t.id
+        WHERE ua.user_id = ? AND ua.is_complete = 1
+    """, (user.id,))
+    
+    user_tests = sqlite_cursor.fetchall()
+    
+    for test_data in user_tests:
+        testtype_id, is_complete, test_type, test_question, section_test_id, section_name, lesson_id = test_data
+        
+        try:
+            # Находим соответствующую секцию в новой системе
+            section = None
+            try:
+                section = Section.objects.get(lesson_id=lesson_id, order=section_test_id)
+            except Section.DoesNotExist:
+                print(f"    Секция для lesson_id={lesson_id}, section_test_id={section_test_id} не найдена")
+                continue
+            
+            # Ищем тест в этой секции по вопросу
+            test = None
+            if section:
+                test_content_type = ContentType.objects.get_for_model(Test)
+                section_items = SectionItem.objects.filter(
+                    section=section,
+                    item_type='test',
+                    content_type=test_content_type
+                )
+                
+                # Ищем тест по вопросу
+                for section_item in section_items:
+                    test_obj = section_item.content_object
+                    if test_obj and test_obj.title and test_question:
+                        if test_question.lower() in test_obj.title.lower() or test_obj.title.lower() in test_question.lower():
+                            test = test_obj
+                            break
+                
+                # Если не нашли по вопросу, берем первый тест в секции
+                if not test and section_items.exists():
+                    test = section_items.first().content_object
+            
+            if not test:
+                print(f"    Тест '{test_question}' (testtype_id={testtype_id}) не найден в новой системе")
+                continue
+            
+            # Определяем статус теста
+            status = 'passed' if is_complete else 'failed'
+            
+            # Получаем информацию о связанных объектах
+            section_id = section.id if section else 0
+            lesson_id_new = section.lesson.id if section else 0
+            course_id_new = section.lesson.course.id if section else 0
+            
+            # Создаем или обновляем прогресс по тесту
+            test_progress, created = TestProgress.objects.get_or_create(
+                user=user,
+                test_id=test.id,
+                defaults={
+                    'test_title': test.title,
+                    'test_type': test.test_type,
+                    'section_id': section_id,
+                    'lesson_id': lesson_id_new,
+                    'course_id': course_id_new,
+                    'attempts_count': 1,
+                    'best_score': 100.0 if is_complete else 0.0,
+                    'last_score': 100.0 if is_complete else 0.0,
+                    'status': status,
+                    'first_attempt_at': timezone.now(),
+                    'last_attempt_at': timezone.now(),
+                    'completed_at': timezone.now() if is_complete else None
+                }
+            )
+            
+            if created:
+                print(f"    Создан прогресс по тесту: {test.title}")
+            
+        except Exception as e:
+            print(f"    Ошибка при миграции теста {test_question}: {e}")
+
+
+def migrate_user_section_progress(sqlite_cursor, user, user_progress):
+    """Миграция прогресса по секциям для конкретного пользователя"""
+    print(f"  Мигрирую прогресс по секциям для {user.username}")
+    
+    from progress_service.models import SectionProgress, TestProgress
+    from lesson_service.models import Section
+    
+    # Получаем все секции, которые пользователь завершил в старой БД
+    # Используем kei_school_usertest для получения завершенных секций
+    sqlite_cursor.execute("""
+        SELECT DISTINCT
+            t.lesson_id,
+            t.id as section_test_id,
+            t.name as section_name,
+            ut.is_complete,
+            ut.complete_date
+        FROM kei_school_usertest ut
+        JOIN kei_school_test t ON ut.test_id = t.id
+        WHERE ut.user_id = ? AND ut.is_complete = 1
+    """, (user.id,))
+    
+    user_sections = sqlite_cursor.fetchall()
+    
+    for section_data in user_sections:
+        lesson_id, section_test_id, section_name, is_complete, complete_date = section_data
+        
+        try:
+            # Находим секцию в новой системе
+            section = Section.objects.filter(lesson_id=lesson_id, order=section_test_id).first()
+            
+            if not section:
+                print(f"    Секция для lesson_id={lesson_id}, section_test_id={section_test_id} не найдена")
+                continue
+            
+            # Подсчитываем общее количество item-ов в секции
+            total_items = section.items.count()
+            
+            # Подсчитываем количество тестов в секции
+            total_tests = section.items.filter(item_type='test').count()
+            
+            # Подсчитываем пройденные тесты в этой секции
+            passed_tests = TestProgress.objects.filter(
+                user=user,
+                section_id=section.id,
+                status='passed'
+            ).count()
+            
+            # Подсчитываем проваленные тесты в этой секции
+            failed_tests = TestProgress.objects.filter(
+                user=user,
+                section_id=section.id,
+                status='failed'
+            ).count()
+            
+            # Если секция была завершена в старой БД, считаем её полностью завершенной
+            if is_complete:
+                completion_percentage = 100.0
+                completed_items = total_items  # Все item-ы считаются завершенными
+            else:
+                # Рассчитываем процент завершения на основе тестов
+                completion_percentage = (passed_tests / total_tests * 100) if total_tests > 0 else 0
+                completed_items = passed_tests
+            
+            # Создаем или обновляем прогресс по секции
+            section_progress, created = SectionProgress.objects.get_or_create(
+                user=user,
+                section=section,
+                defaults={
+                    'total_items': total_items,
+                    'completed_items': completed_items,
+                    'total_tests': total_tests,
+                    'passed_tests': passed_tests,
+                    'failed_tests': failed_tests,
+                    'completion_percentage': completion_percentage,
+                    'is_visited': True,
+                    'visited_at': timezone.now(),
+                    'started_at': timezone.now(),
+                    'completed_at': timezone.now() if completion_percentage >= 100 else None,
+                    'last_activity': timezone.now()
+                }
+            )
+            
+            if created:
+                print(f"    Создан прогресс по секции: {section.title} ({completion_percentage:.1f}%) - завершена в старой БД: {is_complete}")
+            
+        except Exception as e:
+            print(f"    Ошибка при миграции секции lesson_id={lesson_id}, section_test_id={section_test_id}: {e}")
+
+
+def migrate_user_lesson_progress(sqlite_cursor, user, user_progress):
+    """Миграция прогресса по урокам для конкретного пользователя"""
+    print(f"  Мигрирую прогресс по урокам для {user.username}")
+    
+    from progress_service.models import LessonProgress, SectionProgress, TestProgress
+    from lesson_service.models import Lesson
+    
+    # Получаем все уроки, где пользователь завершил хотя бы одну секцию
+    sqlite_cursor.execute("""
+        SELECT DISTINCT
+            t.lesson_id,
+            l.name as lesson_name
+        FROM kei_school_usertest ut
+        JOIN kei_school_test t ON ut.test_id = t.id
+        JOIN kei_school_lesson l ON t.lesson_id = l.id
+        WHERE ut.user_id = ? AND ut.is_complete = 1
+    """, (user.id,))
+    
+    user_lessons = sqlite_cursor.fetchall()
+    
+    for lesson_data in user_lessons:
+        lesson_id, lesson_name = lesson_data
+        
+        try:
+            # Находим урок в новой системе
+            lesson = Lesson.objects.filter(id=lesson_id).first()
+            
+            if not lesson:
+                print(f"    Урок {lesson_name} (ID: {lesson_id}) не найден в новой системе")
+                continue
+            
+            # Подсчитываем количество секций в уроке
+            total_sections = lesson.sections.count()
+            
+            # Подсчитываем завершенные секции
+            completed_sections = SectionProgress.objects.filter(
+                user=user,
+                section__lesson=lesson,
+                completion_percentage=100
+            ).count()
+            
+            # Подсчитываем общее количество тестов в уроке
+            total_tests = TestProgress.objects.filter(
+                user=user,
+                lesson_id=lesson.id
+            ).count()
+            
+            # Подсчитываем пройденные тесты
+            passed_tests = TestProgress.objects.filter(
+                user=user,
+                lesson_id=lesson.id,
+                status='passed'
+            ).count()
+            
+            # Подсчитываем проваленные тесты
+            failed_tests = TestProgress.objects.filter(
+                user=user,
+                lesson_id=lesson.id,
+                status='failed'
+            ).count()
+            
+            # Рассчитываем процент завершения
+            completion_percentage = (completed_sections / total_sections * 100) if total_sections > 0 else 0
+            
+            # Создаем или обновляем прогресс по уроку
+            lesson_progress, created = LessonProgress.objects.get_or_create(
+                user=user,
+                lesson=lesson,
+                defaults={
+                    'total_sections': total_sections,
+                    'completed_sections': completed_sections,
+                    'total_tests': total_tests,
+                    'passed_tests': passed_tests,
+                    'failed_tests': failed_tests,
+                    'completion_percentage': completion_percentage,
+                    'started_at': timezone.now(),
+                    'completed_at': timezone.now() if completion_percentage >= 100 else None,
+                    'last_activity': timezone.now()
+                }
+            )
+            
+            if created:
+                print(f"    Создан прогресс по уроку: {lesson.title} ({completion_percentage:.1f}%)")
+            
+        except Exception as e:
+            print(f"    Ошибка при миграции урока {lesson_name}: {e}")
+
+
+def migrate_user_course_progress(sqlite_cursor, user, user_progress):
+    """Миграция прогресса по курсам для конкретного пользователя"""
+    print(f"  Мигрирую прогресс по курсам для {user.username}")
+    
+    from progress_service.models import CourseProgress, SectionProgress, TestProgress
+    from course_service.models import Course, CourseEnrollment
+    
+    # Получаем все курсы, на которые записан пользователь
+    sqlite_cursor.execute("""
+        SELECT DISTINCT
+            uc.course_id,
+            c.name as course_name
+        FROM kei_school_usercourse uc
+        JOIN kei_school_course c ON uc.course_id = c.id
+        WHERE uc.user_id = ?
+    """, (user.id,))
+    
+    user_courses = sqlite_cursor.fetchall()
+    
+    for course_data in user_courses:
+        course_id, course_name = course_data
+        
+        try:
+            # Находим курс в новой системе
+            course = Course.objects.filter(id=course_id).first()
+            
+            if not course:
+                print(f"    Курс {course_name} (ID: {course_id}) не найден в новой системе")
+                continue
+            
+            # Создаем запись о записи на курс, если её нет
+            enrollment, created = CourseEnrollment.objects.get_or_create(
+                student=user,
+                course=course,
+                defaults={'status': 'active'}
+            )
+            
+            # Подсчитываем количество уроков в курсе
+            total_lessons = course.lessons.count()
+            
+            # Подсчитываем завершенные уроки
+            completed_lessons = LessonProgress.objects.filter(
+                user=user,
+                lesson__course=course,
+                completion_percentage=100
+            ).count()
+            
+            # Подсчитываем общее количество тестов в курсе
+            total_tests = TestProgress.objects.filter(
+                user=user,
+                course_id=course.id
+            ).count()
+            
+            # Подсчитываем пройденные тесты
+            passed_tests = TestProgress.objects.filter(
+                user=user,
+                course_id=course.id,
+                status='passed'
+            ).count()
+            
+            # Подсчитываем проваленные тесты
+            failed_tests = TestProgress.objects.filter(
+                user=user,
+                course_id=course.id,
+                status='failed'
+            ).count()
+            
+            # Рассчитываем процент завершения
+            completion_percentage = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
+            
+            # Подсчитываем общее количество секций в курсе
+            total_sections = sum(lesson.sections.count() for lesson in course.lessons.all())
+            
+            # Подсчитываем завершенные секции
+            completed_sections = SectionProgress.objects.filter(
+                user=user,
+                section__lesson__course=course,
+                completion_percentage=100
+            ).count()
+            
+            # Создаем или обновляем прогресс по курсу
+            course_progress, created = CourseProgress.objects.get_or_create(
+                user=user,
+                course=course,
+                defaults={
+                    'total_lessons': total_lessons,
+                    'completed_lessons': completed_lessons,
+                    'total_sections': total_sections,
+                    'completed_sections': completed_sections,
+                    'total_tests': total_tests,
+                    'passed_tests': passed_tests,
+                    'failed_tests': failed_tests,
+                    'completion_percentage': completion_percentage,
+                    'started_at': timezone.now(),
+                    'completed_at': timezone.now() if completion_percentage >= 100 else None,
+                    'last_activity': timezone.now()
+                }
+            )
+            
+            if created:
+                print(f"    Создан прогресс по курсу: {course.title} ({completion_percentage:.1f}%)")
+            
+        except Exception as e:
+            print(f"    Ошибка при миграции курса {course_name}: {e}")
+
+
+def update_user_overall_progress(user, user_progress):
+    """Обновление общей статистики пользователя"""
+    print(f"  Обновляю общую статистику для {user.username}")
+    
+    from progress_service.models import CourseProgress, LessonProgress, SectionProgress, TestProgress
+    
+    # Подсчитываем общую статистику
+    user_progress.total_courses_enrolled = CourseProgress.objects.filter(user=user).count()
+    user_progress.total_courses_completed = CourseProgress.objects.filter(
+        user=user, completion_percentage=100
+    ).count()
+    user_progress.total_lessons_completed = LessonProgress.objects.filter(
+        user=user, completion_percentage=100
+    ).count()
+    user_progress.total_sections_completed = SectionProgress.objects.filter(
+        user=user, completion_percentage=100
+    ).count()
+    user_progress.total_tests_passed = TestProgress.objects.filter(
+        user=user, status='passed'
+    ).count()
+    user_progress.total_tests_failed = TestProgress.objects.filter(
+        user=user, status='failed'
+    ).count()
+    user_progress.last_activity = timezone.now()
+    
+    user_progress.save()
+    
+    print(f"    Обновлена статистика: курсов={user_progress.total_courses_enrolled}, "
+          f"уроков={user_progress.total_lessons_completed}, "
+          f"тестов={user_progress.total_tests_passed}")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -1076,6 +1542,7 @@ if __name__ == '__main__':
         migrate_material_service(sqlite_conn)
         migrate_tests(sqlite_conn)
         migrate_test_submissions(sqlite_conn)
+        migrate_progress_service(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()

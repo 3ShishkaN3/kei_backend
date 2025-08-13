@@ -55,6 +55,28 @@ class LessonViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def retrieve(self, request, *args, **kwargs):
+        """Переопределяем retrieve для отправки события посещения урока"""
+        lesson = self.get_object()
+        user = request.user
+        
+        # Отправляем события посещения всех секций урока
+        try:
+            for section in lesson.sections.all():
+                send_to_kafka('progress_events', {
+                    'type': 'section_visited',
+                    'user_id': user.id,
+                    'section_id': section.id,
+                    'lesson_id': lesson.id,
+                    'course_id': lesson.course.id,
+                    'timestamp': timezone.now().isoformat()
+                })
+        except Exception as e:
+            # Логируем ошибку, но не прерываем выполнение
+            print(f"Ошибка отправки события section_visited: {e}")
+        
+        return super().retrieve(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         course_pk = self.kwargs.get('course_pk')
         course = get_object_or_404(Course, pk=course_pk)
@@ -159,10 +181,46 @@ class SectionViewSet(viewsets.ModelViewSet):
         current_order = (max_order or 0) + 1
         serializer.save(lesson=lesson, order=current_order)
 
+    def retrieve(self, request, *args, **kwargs):
+        """Переопределяем retrieve для отправки события посещения секции"""
+        section = self.get_object()
+        user = request.user
+        
+        # Отправляем событие посещения секции
+        try:
+            send_to_kafka('progress_events', {
+                'type': 'section_visited',
+                'user_id': user.id,
+                'section_id': section.id,
+                'lesson_id': section.lesson.id,
+                'course_id': section.lesson.course.id,
+                'timestamp': timezone.now().isoformat()
+            })
+        except Exception as e:
+            # Логируем ошибку, но не прерываем выполнение
+            print(f"Ошибка отправки события section_visited: {e}")
+        
+        return super().retrieve(request, *args, **kwargs)
+
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated, CanViewLessonOrSectionContent])
     def completion_status(self, request, lesson_pk=None, pk=None):
         section = self.get_object()
         user = request.user
+        
+        # Отправляем событие посещения секции при проверке статуса
+        try:
+            send_to_kafka('progress_events', {
+                'type': 'section_visited',
+                'user_id': user.id,
+                'section_id': section.id,
+                'lesson_id': section.lesson.id,
+                'course_id': section.lesson.course.id,
+                'timestamp': timezone.now().isoformat()
+            })
+        except Exception as e:
+            # Логируем ошибку, но не прерываем выполнение
+            print(f"Ошибка отправки события section_visited: {e}")
+        
         try:
             completion = SectionCompletion.objects.get(section=section, student=user)
             serializer = SectionCompletionSerializer(completion, context={'request': request})
@@ -348,6 +406,21 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         
         if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет доступа к этому разделю.")
+        
+        # Отправляем событие посещения секции при запросе элементов
+        user = self.request.user
+        try:
+            send_to_kafka('progress_events', {
+                'type': 'section_visited',
+                'user_id': user.id,
+                'section_id': section.id,
+                'lesson_id': section.lesson.id,
+                'course_id': section.lesson.course.id,
+                'timestamp': timezone.now().isoformat()
+            })
+        except Exception as e:
+            # Логируем ошибку, но не прерываем выполнение
+            print(f"Ошибка отправки события section_visited: {e}")
                                    
         return SectionItem.objects.filter(section=section).select_related('content_type').order_by('order')
 

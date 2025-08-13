@@ -114,6 +114,48 @@ class LessonProgress(models.Model):
         return f"{self.user.username} - {self.lesson.title} ({self.completion_percentage}%)"
 
 
+class SectionProgress(models.Model):
+    """Прогресс по секциям"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='section_progress',
+        verbose_name="Пользователь"
+    )
+    section = models.ForeignKey(
+        Section,
+        on_delete=models.CASCADE,
+        related_name='user_progress',
+        verbose_name="Секция"
+    )
+    total_items = models.PositiveIntegerField(default=0, verbose_name="Всего элементов в секции")
+    completed_items = models.PositiveIntegerField(default=0, verbose_name="Завершенных элементов")
+    total_tests = models.PositiveIntegerField(default=0, verbose_name="Всего тестов в секции")
+    passed_tests = models.PositiveIntegerField(default=0, verbose_name="Пройденных тестов")
+    failed_tests = models.PositiveIntegerField(default=0, verbose_name="Проваленных тестов")
+    completion_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00, 
+        verbose_name="Процент завершения"
+    )
+    is_visited = models.BooleanField(default=False, verbose_name="Посещена")
+    visited_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата посещения")
+    started_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата начала")
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата завершения")
+    last_activity = models.DateTimeField(null=True, blank=True, verbose_name="Последняя активность")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
+
+    class Meta:
+        verbose_name = "Прогресс по секции"
+        verbose_name_plural = "Прогресс по секциям"
+        unique_together = ('user', 'section')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.section.title} ({self.completion_percentage}%)"
+
+
 class TestProgress(models.Model):
     """Прогресс по тестам"""
     user = models.ForeignKey(

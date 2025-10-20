@@ -6,6 +6,7 @@ to_migrate/
 .mypy_cache/
 .vscode/
 .trunk/
+media/
 
 # Python bytecode and caches
 __pycache__/

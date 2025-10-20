@@ -29,6 +29,10 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
 
+# LLM Grading Service
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
+
 CELERY_BEAT_SCHEDULE = {
     'cleanup-expired-confirmation-codes': {
         'task': 'auth_service.tasks.cleanup_expired_confirmation_codes',

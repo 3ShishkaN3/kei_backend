@@ -10,17 +10,13 @@ def get_producer():
     global producer
     if producer is None:
         try:
-            # В Docker среде используем внутренний адрес kafka:29092
-            # Для локальной разработки можно использовать localhost:9092
             bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=Csv())
             
             producer = KafkaProducer(
                 bootstrap_servers=bootstrap_servers,
                 value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-                # Добавляем таймауты для предотвращения зависания
                 request_timeout_ms=5000,
                 api_version_auto_timeout_ms=5000,
-                # Повторные попытки подключения
                 retries=3,
                 retry_backoff_ms=1000
             )
@@ -39,9 +35,8 @@ def send_to_kafka(topic, data):
             return False
             
         future = kafka_producer.send(topic, value=data)
-        # Ждем отправки с таймаутом
         record_metadata = future.get(timeout=5)
-        logger.debug(f"Event sent to Kafka topic {topic} partition {record_metadata.partition} offset {record_metadata.offset}")
+        logger.info(f"Event sent to Kafka topic {topic} partition {record_metadata.partition} offset {record_metadata.offset}")
         return True
     except Exception as e:
         logger.error(f"Error sending Kafka event for topic {topic}: {e}")

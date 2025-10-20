@@ -58,8 +58,8 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
                 try:
                     data = serializer_class(content_object, context=context).data
-                    # Дополнительно: если это тест и у пользователя включено отображение ответов —
-                    # прикладываем последнюю отправку пользователя по этому тесту в рамках этого элемента раздела
+                    # Если это тест и у пользователя включено отображение ответов —
+                    # прикладывается последняя отправка пользователя по этому тесту в рамках этого элемента раздела
                     if item_type == 'test' and context.get('request') and hasattr(context['request'], 'user'):
                         user = context['request'].user
                         user_settings = getattr(user, 'settings', None)
@@ -89,7 +89,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
                                     )
                                     data['student_submission_details'] = submission_serializer.data
                             except Exception:
-                                # Не прерываем сериализацию урока при ошибке получения отправки
                                 pass
                     return data
                 except Exception as e:
@@ -125,7 +124,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
                     tests_cache[lesson_id] = mapping
                 status = mapping.get(int(obj.object_id))
                 return status == 'passed'
-            # Для нетестовых элементов используем кэш секций
+            # Для нетестовых элементов используется кэш секций
             section_cache = cache.setdefault('sections', {})
             s_entry = section_cache.get(obj.section.id)
             if s_entry is None:
@@ -144,7 +143,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
             completion = float(s_entry.get('completion_percentage', 0))
             if completion >= 99.5:
                 return True
-            # Если в секции нет тестов и секция посещена — считаем материалы изученными
+            # Если в секции нет тестов и секция посещена — материалы изучены
             if s_entry.get('total_tests', 0) == 0 and s_entry.get('is_visited'):
                 return True
             return False

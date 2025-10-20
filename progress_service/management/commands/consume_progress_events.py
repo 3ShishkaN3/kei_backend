@@ -11,6 +11,7 @@ from course_service.models import Course, CourseEnrollment
 from lesson_service.models import Lesson, Section
 from kafka import KafkaConsumer
 from decouple import config
+from progress_service.tasks import grade_free_text_submission
 
 User = get_user_model()
 
@@ -19,7 +20,6 @@ class Command(BaseCommand):
     help = "Прослушивание событий прогресса из Kafka и обновление данных прогресса"
 
     def handle(self, *args, **options):
-        # Используем правильный адрес Kafka для Docker среды
         bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=lambda v: [s.strip() for s in v.split(',')])
         
         consumer = KafkaConsumer(
@@ -27,7 +27,6 @@ class Command(BaseCommand):
             bootstrap_servers=bootstrap_servers,
             auto_offset_reset='earliest',
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            # Добавляем таймауты
             session_timeout_ms=30000,
             heartbeat_interval_ms=3000
         )
@@ -53,9 +52,10 @@ class Command(BaseCommand):
                         self.handle_lesson_completed(data, user)
                     elif event_type == 'section_completed':
                         self.handle_section_completed(data, user)
-                                # Удалено: section_visited больше не используется
                     elif event_type == 'test_submitted':
                         self.handle_test_submitted(data, user)
+                    elif event_type == 'test_graded':
+                        self.handle_test_graded(data, user)
                     elif event_type == 'material_viewed':
                         self.handle_material_viewed(data, user)
                     else:
@@ -75,7 +75,6 @@ class Command(BaseCommand):
             self.stdout.write(f"Урок с id {lesson_id} не найден")
             return
         
-        # Обновляем или создаем прогресс по уроку
         lesson_progress, created = LessonProgress.objects.get_or_create(
             user=user,
             lesson=lesson,
@@ -95,10 +94,8 @@ class Command(BaseCommand):
             lesson_progress.last_activity = timezone.now()
             lesson_progress.save()
         
-        # Обновляем общий прогресс пользователя
         self.update_user_progress(user)
         
-        # Обновляем прогресс по курсу
         self.update_course_progress(user, course_id)
         
         self.stdout.write(f"Прогресс по уроку {lesson_id} обновлен для пользователя {user.username}")
@@ -116,7 +113,6 @@ class Command(BaseCommand):
             self.stdout.write(f"Раздел с id {section_id} не найден")
             return
         
-        # Обновляем или создаем прогресс по уроку
         lesson_progress, created = LessonProgress.objects.get_or_create(
             user=user,
             lesson=lesson,
@@ -153,8 +149,6 @@ class Command(BaseCommand):
         
         self.stdout.write(f"Прогресс по разделу {section_id} обновлен для пользователя {user.username}")
 
-c
-
     def handle_test_submitted(self, data, user):
         """Обработка отправки теста"""
         test_id = data.get('test_id')
@@ -166,7 +160,6 @@ c
         submission_id = data.get('submission_id')
         status = data.get('status')
         
-        # Обновляем или создаем прогресс по тесту
         test_progress, created = TestProgress.objects.get_or_create(
             user=user,
             test_id=test_id,
@@ -196,19 +189,58 @@ c
             
             test_progress.save()
         
-        # Обновляем прогресс по секции
         self.update_section_progress(user, section_id)
         
-        # Обновляем прогресс по уроку
         self.update_lesson_progress(user, lesson_id)
         
-        # Обновляем прогресс по курсу
         self.update_course_progress(user, course_id)
         
-        # Обновляем общий прогресс пользователя
         self.update_user_progress(user)
         
+        if test_type == 'free-text' and status == 'grading_pending':
+            grade_free_text_submission.delay(submission_id)
+            self.stdout.write(f"Задача на оценку теста {test_id} для пользователя {user.username} отправлена в очередь.")
+
         self.stdout.write(f"Прогресс по тесту {test_id} обновлен для пользователя {user.username}")
+
+    def handle_test_graded(self, data, user):
+        """Обработка события о завершении ручной/LLM проверки теста."""
+        test_id = data.get('test_id')
+        status = data.get('status')
+        score = data.get('score', 0)
+
+        try:
+            test_progress = TestProgress.objects.get(user=user, test_id=test_id)
+        except TestProgress.DoesNotExist:
+            self.stdout.write(f"TestProgress для теста {test_id} и пользователя {user.username} не найден.")
+            return
+
+        # 1. Обновляем TestProgress
+        test_progress.status = 'passed' if status == 'auto_passed' else 'failed'
+        test_progress.last_score = score
+        if test_progress.best_score is None or score > test_progress.best_score:
+            test_progress.best_score = score
+
+        if test_progress.status == 'passed' and not test_progress.completed_at:
+            test_progress.completed_at = timezone.now()
+        test_progress.save()
+
+        # 2. Начисляем очки опыта в LearningStats
+        try:
+            stats, _ = LearningStats.objects.get_or_create(user=user)
+            stats.experience_points += int(score)
+            stats.save()
+        except Exception as e:
+            self.stdout.write(f"Ошибка начисления очков опыта для {user.username}: {e}")
+
+        # 3. Запускаем стандартную цепочку обновления прогрессов
+        self.update_section_progress(user, data.get('section_id'))
+        self.update_lesson_progress(user, data.get('lesson_id'))
+        self.update_course_progress(user, data.get('course_id'))
+        self.update_user_progress(user)
+
+        self.stdout.write(f"Прогресс по тесту {test_id} (LLM) обновлен. Начислено {score} очков.")
+
 
     def handle_material_viewed(self, data, user):
         """Обработка просмотра нетестового материала"""
@@ -218,7 +250,6 @@ c
         course_id = data.get('course_id')
         item_type = (data.get('item_type') or '').lower()
 
-        # Игнорируем тесты — они учитываются отдельно
         if item_type == 'test':
             return
 
@@ -226,14 +257,12 @@ c
             self.stdout.write("Некорректные данные для material_viewed")
             return
 
-        # Регистрируем просмотр (идемпотентно)
         SectionItemView.objects.get_or_create(
             user=user,
             section_item_id=section_item_id,
             defaults={'section_id': section_id}
         )
 
-        # Обновляем прогрессы
         self.update_section_progress(user, section_id)
         self.update_lesson_progress(user, lesson_id)
         self.update_course_progress(user, course_id)
@@ -255,7 +284,6 @@ c
         if not created:
             progress.last_activity = timezone.now()
         
-        # Подсчитываем статистику
         progress.total_courses_enrolled = CourseEnrollment.objects.filter(
             student=user, status='active'
         ).count()
@@ -302,11 +330,9 @@ c
         if not created:
             section_progress.last_activity = timezone.now()
         
-        # Подсчитываем статистику по секции
         total_items = section.items.count()
         total_tests = section.items.filter(item_type='test').count()
 
-        # Пройденные/проваленные тесты
         passed_tests = TestProgress.objects.filter(
             user=user, section_id=section_id, status='passed'
         ).count()
@@ -314,14 +340,12 @@ c
             user=user, section_id=section_id, status='failed'
         ).count()
 
-        # Просмотренные нетестовые материалы
         total_non_tests = max(0, total_items - total_tests)
         viewed_non_tests = SectionItemView.objects.filter(
             user=user, section_id=section_id
         ).count()
         viewed_non_tests = min(viewed_non_tests, total_non_tests)
 
-        # Обновляем поля
         section_progress.total_items = total_items
         section_progress.total_tests = total_tests
         section_progress.passed_tests = passed_tests

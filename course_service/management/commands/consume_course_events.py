@@ -9,7 +9,7 @@ class Command(BaseCommand):
     help = "Прослушивание событий из Kafka от сервисов, связанных с курсами"
 
     def handle(self, *args, **options):
-        # Используем правильный адрес Kafka для Docker среды
+        
         bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=lambda v: [s.strip() for s in v.split(',')])
         
         consumer = KafkaConsumer(
@@ -17,7 +17,6 @@ class Command(BaseCommand):
             bootstrap_servers=bootstrap_servers,
             auto_offset_reset='earliest',
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            # Добавляем таймауты
             session_timeout_ms=30000,
             heartbeat_interval_ms=3000
         )

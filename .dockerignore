@@ -1,0 +1,46 @@
+# Ignore logs, media, and migration helpers
+logs/
+.trash/
+to_migrate/
+.git
+.mypy_cache/
+.vscode/
+.trunk/
+media/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Test and coverage files
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Local environment and swap files
+.cache
+*.swp
+
+# Log files
+*.log
+
+# MacOS
+.DS_Store
+
+*.mypy_cache/
+*.vscode/
+*.trunk/
+*.trash/
+*/.mypy_cache/
+*/.vscode/
+*/.trunk/
+*/.trash/
+to_migrate/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd

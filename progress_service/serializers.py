@@ -23,16 +23,26 @@ class CourseProgressSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     course_title = serializers.CharField(source='course.title', read_only=True)
     course_subtitle = serializers.CharField(source='course.subtitle', read_only=True)
-    
+    in_progress_lessons = serializers.SerializerMethodField()
+
     class Meta:
         model = CourseProgress
         fields = [
-            'id', 'username', 'course_title', 'course_subtitle', 'total_lessons',
-            'completed_lessons', 'total_sections', 'completed_sections', 'total_tests',
+            'id', 'username', 'course_id', 'course_title', 'course_subtitle', 'total_lessons',
+            'completed_lessons', 'in_progress_lessons', 'total_sections', 'completed_sections', 'total_tests',
             'passed_tests', 'failed_tests', 'completion_percentage', 'started_at',
             'completed_at', 'last_activity', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
+
+    def get_in_progress_lessons(self, obj):
+        from .models import LessonProgress
+        return LessonProgress.objects.filter(
+            user=obj.user,
+            lesson__course=obj.course,
+            completion_percentage__gt=0,
+            completion_percentage__lt=100
+        ).count()
 
 
 class LessonProgressSerializer(serializers.ModelSerializer):

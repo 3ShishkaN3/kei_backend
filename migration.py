@@ -4,6 +4,7 @@ import psycopg2
 import sqlite3
 import django
 import shutil
+import datetime
 from django.utils import timezone
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kei_backend'))
@@ -979,87 +980,214 @@ def migrate_tests(sqlite_conn):
 def migrate_test_submissions(sqlite_conn):
     print("\nНачинаю миграцию ответов пользователей на тесты...")
     sqlite_cursor = sqlite_conn.cursor()
-    
+
     from material_service.models import (
-        Test, TestSubmission, MCQSubmissionAnswer, 
-        FreeTextSubmissionAnswer, WordOrderSubmissionAnswer, 
-        DragDropSubmissionAnswer
+        Test, TestSubmission, MCQSubmissionAnswer, FreeTextSubmissionAnswer,
+        WordOrderSubmissionAnswer, DragDropSubmissionAnswer, MCQOption,
+        WordOrderSentence, MatchingPair
     )
-    
+    from lesson_service.models import Section, SectionItem
+    from django.contrib.contenttypes.models import ContentType
+
+    # 1. Создаем карту соответствия: old_testtype_id -> new_test_id
+    print("  Создаю карту соответствия старых и новых тестов...")
+    old_to_new_test_map = {}
+    all_new_tests = Test.objects.all()
+    for new_test in all_new_tests:
+        # Извлекаем старый ID из заголовка, если он там есть
+        try:
+            if new_test.title and 'Тест ' in new_test.title:
+                old_id = int(new_test.title.split('Тест ')[-1])
+                old_to_new_test_map[old_id] = new_test
+        except (ValueError, IndexError):
+            continue
+    print(f"  Карта создана, найдено {len(old_to_new_test_map)} сопоставлений.")
+
+    # 2. Мигрируем реальные текстовые ответы
     sqlite_cursor.execute("""
-        SELECT 
-            ua.id,
-            ua.is_complete,
-            ua.test_id,
-            ua.user_id,
-            ua.text,
-            tt.type as test_type,
-            tt.id as testtype_id
+        SELECT ua.id, ua.user_id, ua.text, ua.test_id as testtype_id
         FROM kei_school_useranswers ua
         JOIN kei_school_testtype tt ON ua.test_id = tt.id
-        WHERE ua.is_complete = 1
+        WHERE tt.type = 'text_test' AND ua.text IS NOT NULL AND ua.text != ''
+    """,)
+    free_text_answers = sqlite_cursor.fetchall()
+    text_submission_count = 0
+
+    for answer in free_text_answers:
+        try:
+            user = User.objects.get(id=answer['user_id'])
+            new_test = old_to_new_test_map.get(answer['testtype_id'])
+
+            if not new_test:
+                continue
+            
+            # Проверяем, чтобы не дублировать
+            if TestSubmission.objects.filter(test=new_test, student=user).exists():
+                continue
+
+            submission = TestSubmission.objects.create(
+                test=new_test, student=user, status='graded', score=100.0
+            )
+            FreeTextSubmissionAnswer.objects.create(
+                submission=submission, answer_text=answer['text']
+            )
+            text_submission_count += 1
+        except User.DoesNotExist:
+            continue
+        except Exception as e:
+            print(f"  Ошибка при миграции текстового ответа {answer['id']}: {e}")
+    print(f"  Мигрировано {text_submission_count} текстовых ответов.")
+
+    # 3. Мигрируем пройденные тесты, создавая правильные ответы
+    sqlite_cursor.execute("""
+        SELECT ua.user_id, ua.test_id as testtype_id
+        FROM kei_school_useranswers ua
+        JOIN kei_school_testtype tt ON ua.test_id = tt.id
+        WHERE ua.is_complete = 1 AND tt.type != 'text_test'
     """)
-    
-    user_answers = sqlite_cursor.fetchall()
-    submission_count = 0
-    
-    for ua in user_answers:
-        ua_id, is_complete, testtype_id, user_id, text, test_type, testtype_id = ua
-        
+    passed_answers = sqlite_cursor.fetchall()
+    inferred_submission_count = 0
+
+    for p_answer in passed_answers:
+        try:
+            user = User.objects.get(id=p_answer['user_id'])
+            new_test = old_to_new_test_map.get(p_answer['testtype_id'])
+
+            if not new_test:
+                continue
+
+            if TestSubmission.objects.filter(test=new_test, student=user).exists():
+                continue
+
+            submission = TestSubmission.objects.create(
+                test=new_test, student=user, status='auto_passed', score=100.0
+            )
+
+            if new_test.test_type in ['mcq-single', 'mcq-multi']:
+                correct_options = MCQOption.objects.filter(test=new_test, is_correct=True)
+                if correct_options.exists():
+                    mcq_answer = MCQSubmissionAnswer.objects.create(submission=submission)
+                    mcq_answer.selected_options.set(correct_options)
+
+            elif new_test.test_type == 'word-order':
+                details = WordOrderSentence.objects.filter(test=new_test).first()
+                if details:
+                    WordOrderSubmissionAnswer.objects.create(
+                        submission=submission,
+                        submitted_order_words=details.correct_ordered_texts
+                    )
+
+            elif new_test.test_type == 'drag-and-drop':
+                slots = MatchingPair.objects.filter(test=new_test)
+                for slot in slots:
+                    DragDropSubmissionAnswer.objects.create(
+                        submission=submission, slot=slot,
+                        dropped_option_text=slot.correct_answer_text, is_correct=True
+                    )
+            
+            inferred_submission_count += 1
+        except User.DoesNotExist:
+            continue
+        except Exception as e:
+            print(f"  Ошибка при создании выведенного ответа для testtype_id {p_answer['testtype_id']}: {e}")
+
+    print(f"  Создано {inferred_submission_count} выведенных успешных ответов.")
+
+
+def migrate_section_item_views(sqlite_conn):
+    print("\nНачинаю миграцию просмотров элементов секций (SectionItemView)...")
+    from lesson_service.models import Lesson, SectionItem
+    from auth_service.models import User
+    from progress_service.models import SectionItemView
+
+    sqlite_cursor = sqlite_conn.cursor()
+    sqlite_cursor.execute("SELECT user_id, lesson_id FROM kei_school_userlesson WHERE is_complete = 1")
+    completed_lessons = sqlite_cursor.fetchall()
+
+    view_count = 0
+    created_views = set()
+
+    for user_id, lesson_id in completed_lessons:
         try:
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            print(f"Пользователь с id={user_id} не найден. Пропускаю ответ {ua_id}.")
+            lesson = Lesson.objects.get(id=lesson_id)
+        except (User.DoesNotExist, Lesson.DoesNotExist):
             continue
-        
-        try:
-            test = Test.objects.filter(title__icontains=f"Тест {testtype_id}").first()
-            if not test:
-                test = Test.objects.filter(created_at__isnull=False).order_by('-created_at').first()
-            
-            if not test:
-                print(f"Тест для testtype_id={testtype_id} не найден. Пропускаю ответ {ua_id}.")
-                continue
-        except Exception as e:
-            print(f"Ошибка при поиске теста для testtype_id={testtype_id}: {e}")
-            continue
-        
-        submission = TestSubmission.objects.create(
-            test=test,
-            student=user,
-            section_item=None,
-            status='auto_passed' if is_complete else 'auto_failed',
-            score=1.0 if is_complete else 0.0
-        )
-        
-        if test_type == 'choice_test':
-            MCQSubmissionAnswer.objects.create(submission=submission)
-            
-        elif test_type == 'text_test' and text:
-            FreeTextSubmissionAnswer.objects.create(
-                submission=submission,
-                answer_text=text
-            )
-            
-        elif test_type == 'order_test':
-            WordOrderSubmissionAnswer.objects.create(
-                submission=submission,
-                submitted_order_words=[]
-            )
-            
-        elif test_type == 'correlation_test':
-            for slot in test.drag_drop_slots.all():
-                DragDropSubmissionAnswer.objects.create(
-                    submission=submission,
-                    slot=slot,
-                    dropped_option_text='',
-                    is_correct=None
-                )
-        
-        submission_count += 1
-    
-    print(f"Миграция ответов пользователей завершена. Создано {submission_count} записей.")
 
+        section_items = SectionItem.objects.filter(section__lesson=lesson).exclude(item_type='test')
+
+        for item in section_items:
+            if (user.id, item.id) in created_views:
+                continue
+
+            _, created = SectionItemView.objects.get_or_create(
+                user=user,
+                section_item_id=item.id,
+                defaults={'section_id': item.section.id}
+            )
+            if created:
+                view_count += 1
+                created_views.add((user.id, item.id))
+    
+    print(f"Создано {view_count} новых записей о просмотрах элементов.")
+
+
+def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
+    print(f"  Мигрирую LearningStats для {user.username}")
+
+    # Миграция очков опыта
+    sqlite_cursor.execute("SELECT experience_points FROM kei_school_userexperience WHERE user_id = ?", (user.id,))
+    exp_data = sqlite_cursor.fetchone()
+    if exp_data:
+        learning_stats.experience_points = exp_data['experience_points']
+        print(f"    - Мигрировано очков опыта: {learning_stats.experience_points}")
+
+    # Расчет статистики по дням обучения (streaks)
+    sqlite_cursor.execute("""
+        SELECT complete_date as activity_date FROM kei_school_usertest WHERE user_id = ? AND is_complete = 1
+        UNION
+        SELECT complete_date as activity_date FROM kei_school_userlesson WHERE user_id = ? AND is_complete = 1
+    """, (user.id, user.id))
+    
+    activity_dates = set()
+    for row in sqlite_cursor.fetchall():
+        if row['activity_date']:
+            # Преобразуем строку 'YYYY-MM-DD HH:MM:SS.ffffff' в 'YYYY-MM-DD'
+            date_str = str(row['activity_date']).split(' ')[0]
+            activity_dates.add(date_str)
+
+    sorted_dates = sorted(list(activity_dates))
+
+    if sorted_dates:
+        total_study_days = len(sorted_dates)
+        longest_streak = 0
+        current_streak = 0
+        
+        if total_study_days > 0:
+            longest_streak = 1
+            current_streak = 1
+            for i in range(1, len(sorted_dates)):
+                prev_date = datetime.datetime.strptime(sorted_dates[i-1], '%Y-%m-%d').date()
+                curr_date = datetime.datetime.strptime(sorted_dates[i], '%Y-%m-%d').date()
+                if (curr_date - prev_date).days == 1:
+                    current_streak += 1
+                else:
+                    longest_streak = max(longest_streak, current_streak)
+                    current_streak = 1
+            longest_streak = max(longest_streak, current_streak)
+
+        # Проверка текущего стрика до сегодняшнего дня
+        today = timezone.now().date()
+        last_activity_date = datetime.datetime.strptime(sorted_dates[-1], '%Y-%m-%d').date()
+        if (today - last_activity_date).days > 1:
+            current_streak = 0 # Стрик прерван
+
+        learning_stats.total_study_days = total_study_days
+        learning_stats.longest_streak_days = longest_streak
+        learning_stats.current_streak_days = current_streak
+        print(f"    - Статистика по дням: Всего дней={total_study_days}, Макс. стрик={longest_streak}, Текущий стрик={current_streak}")
+
+    learning_stats.save()
 
 def migrate_progress_service(sqlite_conn):
     """Миграция прогресса пользователей из старой БД"""
@@ -1068,7 +1196,7 @@ def migrate_progress_service(sqlite_conn):
     
     from progress_service.models import (
         UserProgress, CourseProgress, LessonProgress, 
-        SectionProgress, TestProgress, LearningStats
+        SectionProgress, TestProgress, LearningStats, SectionItemView
     )
     from course_service.models import CourseEnrollment
     from lesson_service.models import Section
@@ -1091,6 +1219,7 @@ def migrate_progress_service(sqlite_conn):
             user=student,
             defaults={'level': 1, 'experience_points': 0}
         )
+        migrate_user_learning_stats(sqlite_cursor, student, learning_stats)
         
         # Мигрируем прогресс по тестам
         migrate_user_test_progress(sqlite_cursor, student, user_progress)
@@ -1542,6 +1671,7 @@ if __name__ == '__main__':
         migrate_material_service(sqlite_conn)
         migrate_tests(sqlite_conn)
         migrate_test_submissions(sqlite_conn)
+        migrate_section_item_views(sqlite_conn)
         migrate_progress_service(sqlite_conn)
 
     if sqlite_conn:

@@ -8,7 +8,7 @@ from progress_service.models import (
     SectionItemView
 )
 from course_service.models import Course, CourseEnrollment
-from lesson_service.models import Lesson, Section
+from lesson_service.models import Lesson, Section, SectionItem
 from kafka import KafkaConsumer
 from decouple import config
 from progress_service.tasks import grade_free_text_submission
@@ -96,7 +96,13 @@ class Command(BaseCommand):
         
         self.update_user_progress(user)
         
-        self.update_course_progress(user, course_id)
+        completed_lessons_count = LessonProgress.objects.filter(
+            user=user, lesson__course_id=course_id, completion_percentage=100
+        ).count()
+        passed_tests_count = TestProgress.objects.filter(
+            user=user, course_id=course_id, status='passed'
+        ).values('test_id').distinct().count()
+        self.update_course_progress(user, course_id, completed_lessons_count, passed_tests_count)
         
         self.stdout.write(f"Прогресс по уроку {lesson_id} обновлен для пользователя {user.username}")
 
@@ -145,7 +151,13 @@ class Command(BaseCommand):
         self.update_user_progress(user)
         
         # Обновляем прогресс по курсу
-        self.update_course_progress(user, course_id)
+        completed_lessons_count = LessonProgress.objects.filter(
+            user=user, lesson__course_id=course_id, completion_percentage=100
+        ).count()
+        passed_tests_count = TestProgress.objects.filter(
+            user=user, course_id=course_id, status='passed'
+        ).values('test_id').distinct().count()
+        self.update_course_progress(user, course_id, completed_lessons_count, passed_tests_count)
         
         self.stdout.write(f"Прогресс по разделу {section_id} обновлен для пользователя {user.username}")
 
@@ -193,7 +205,13 @@ class Command(BaseCommand):
         
         self.update_lesson_progress(user, lesson_id)
         
-        self.update_course_progress(user, course_id)
+        completed_lessons_count = LessonProgress.objects.filter(
+            user=user, lesson__course_id=course_id, completion_percentage=100
+        ).count()
+        passed_tests_count = TestProgress.objects.filter(
+            user=user, course_id=course_id, status='passed'
+        ).values('test_id').distinct().count()
+        self.update_course_progress(user, course_id, completed_lessons_count, passed_tests_count)
         
         self.update_user_progress(user)
         
@@ -236,7 +254,15 @@ class Command(BaseCommand):
         # 3. Запускаем стандартную цепочку обновления прогрессов
         self.update_section_progress(user, data.get('section_id'))
         self.update_lesson_progress(user, data.get('lesson_id'))
-        self.update_course_progress(user, data.get('course_id'))
+        
+        course_id = data.get('course_id')
+        completed_lessons_count = LessonProgress.objects.filter(
+            user=user, lesson__course_id=course_id, completion_percentage=100
+        ).count()
+        passed_tests_count = TestProgress.objects.filter(
+            user=user, course_id=course_id, status='passed'
+        ).values('test_id').distinct().count()
+        self.update_course_progress(user, course_id, completed_lessons_count, passed_tests_count)
         self.update_user_progress(user)
 
         self.stdout.write(f"Прогресс по тесту {test_id} (LLM) обновлен. Начислено {score} очков.")
@@ -265,7 +291,14 @@ class Command(BaseCommand):
 
         self.update_section_progress(user, section_id)
         self.update_lesson_progress(user, lesson_id)
-        self.update_course_progress(user, course_id)
+
+        completed_lessons_count = LessonProgress.objects.filter(
+            user=user, lesson__course_id=course_id, completion_percentage=100
+        ).count()
+        passed_tests_count = TestProgress.objects.filter(
+            user=user, course_id=course_id, status='passed'
+        ).values('test_id').distinct().count()
+        self.update_course_progress(user, course_id, completed_lessons_count, passed_tests_count)
         self.update_user_progress(user)
 
         self.stdout.write(
@@ -408,35 +441,46 @@ class Command(BaseCommand):
         
         lesson_progress.save()
 
-    def update_course_progress(self, user, course_id):
+    def update_course_progress(self, user, course_id, completed_lessons_count, passed_tests_count):
         """Обновление прогресса по курсу"""
         try:
             course = Course.objects.get(pk=course_id)
         except Course.DoesNotExist:
             return
-        
+
         course_progress, created = CourseProgress.objects.get_or_create(
             user=user,
             course=course,
-            defaults={
-                'last_activity': timezone.now()
-            }
+            defaults={'last_activity': timezone.now()}
         )
-        
+
         if not created:
             course_progress.last_activity = timezone.now()
-        
-        # Подсчитываем статистику по курсу
-        course_progress.total_lessons = course.lessons.count()
-        course_progress.completed_lessons = LessonProgress.objects.filter(
-            user=user, lesson__course=course, completion_percentage=100
+
+        # Получаем актуальные данные
+        total_lessons = course.lessons.count()
+        total_tests = SectionItem.objects.filter(section__lesson__course=course, item_type='test').count()
+        total_sections = Section.objects.filter(lesson__course=course).count()
+        completed_sections = SectionProgress.objects.filter(
+            user=user, section__lesson__course=course, completion_percentage=100
         ).count()
-        
-        # Рассчитываем процент завершения: завершенные уроки / все уроки
-        if course_progress.total_lessons > 0:
-            course_progress.completion_percentage = (course_progress.completed_lessons / course_progress.total_lessons) * 100
-        else:
-            course_progress.completion_percentage = 0.00
+        failed_tests = TestProgress.objects.filter(
+            user=user, course_id=course.id, status='failed'
+        ).values('test_id').distinct().count()
+
+        # Обновляем поля
+        course_progress.total_lessons = total_lessons
+        course_progress.completed_lessons = completed_lessons_count
+        course_progress.total_sections = total_sections
+        course_progress.completed_sections = completed_sections
+        course_progress.total_tests = total_tests
+        course_progress.passed_tests = passed_tests_count
+        course_progress.failed_tests = failed_tests
+
+        # Рассчитываем процент завершения
+        lessons_completion = (completed_lessons_count / total_lessons * 100) if total_lessons > 0 else 0
+        tests_completion = (passed_tests_count / total_tests * 100) if total_tests > 0 else 0
+        course_progress.completion_percentage = (lessons_completion + tests_completion) / 2
         
         # Если курс завершен, устанавливаем дату завершения
         if course_progress.completion_percentage >= 100 and not course_progress.completed_at:

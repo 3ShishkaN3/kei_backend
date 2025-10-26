@@ -120,13 +120,16 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
         course_id = self.request.query_params.get('course_id')
         if course_id:
             queryset = queryset.filter(course_id=course_id)
-        
+
         # Фильтрация по статусу завершения
         completion_status = self.request.query_params.get('completion_status')
         if completion_status == 'completed':
             queryset = queryset.filter(completion_percentage=100)
         elif completion_status == 'in_progress':
-            queryset = queryset.filter(completion_percentage__lt=100)
+            queryset = queryset.filter(completion_percentage__gt=0, completion_percentage__lt=100)
+        elif completion_status == 'not_started':
+            queryset = queryset.filter(completion_percentage=0)
+
         
         return queryset
 

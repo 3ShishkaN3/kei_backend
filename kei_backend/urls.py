@@ -29,7 +29,8 @@ urlpatterns = [
     path(f"{BASE_URL}/v{API_VERSION}/lessons/", include("lesson_service.urls")),
     path(f"{BASE_URL}/v{API_VERSION}/materials/", include("material_service.urls")),
     path(f"{BASE_URL}/v{API_VERSION}/dict/", include("dict_service.urls")),
-    path(f"{BASE_URL}/v{API_VERSION}/progress/", include("progress_service.urls"))
+    path(f"{BASE_URL}/v{API_VERSION}/progress/", include("progress_service.urls")),
+    path(f"{BASE_URL}/v{API_VERSION}/calendar/", include("calendar_service.urls")),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

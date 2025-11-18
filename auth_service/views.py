@@ -19,6 +19,11 @@ from django.middleware.csrf import get_token
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import filters
+from django.db.models import Q
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer, 
@@ -32,6 +37,9 @@ from .serializers import (
     ResendRegisterSerializer,
     RequestPasswordChangeSerializer,
     ConfirmPasswordChangeSerializer,
+    AdminCreateUserSerializer,
+    AdminUpdateUserSerializer,
+    BulkUserOperationSerializer,
 )
 
 
@@ -204,6 +212,87 @@ class UserRoleView(GenericAPIView):
                 return Response({"error": "Недостаточно прав"}, status=status.HTTP_403_FORBIDDEN)
         user.save()
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class StudentsPagination(PageNumberPagination):
+    """Пагинация для списка учеников."""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
+class StudentsListView(APIView):
+    """
+    Представление для получения списка учеников с расширенной фильтрацией.
+    
+    Позволяет администраторам и преподавателям получать список учеников
+    с фильтрацией по статусу активности, поиском и пагинацией.
+    """
+    
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StudentsPagination
+    
+    def get(self, request):
+        """
+        Возвращает список учеников с возможностью фильтрации.
+        
+        Доступно только для администраторов и преподавателей.
+        
+        Параметры запроса:
+        - is_active: true/false - фильтр по статусу активности (по умолчанию только активные)
+        - search: строка поиска по username или email
+        - role: фильтр по роли (по умолчанию student)
+        """
+        
+        if request.user.role not in ["admin", "teacher"]:
+            return Response(
+                {"error": "Недостаточно прав"}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Фильтр по роли (по умолчанию только студенты)
+        role_param = request.query_params.get('role')
+        if role_param:
+            try:
+                queryset = User.objects.filter(role=role_param)
+            except ValueError:
+                queryset = User.objects.filter(role=User.Role.STUDENT)
+        else:
+            queryset = User.objects.filter(role=User.Role.STUDENT)
+        
+        # Фильтр по активности (по умолчанию только активные, если не указано явно)
+        is_active_param = request.query_params.get('is_active')
+        
+        if is_active_param is None:
+            # По умолчанию показываем только активных
+            queryset = queryset.filter(is_active=True)
+        elif is_active_param.lower() in ['true', 'false']:
+            queryset = queryset.filter(is_active=(is_active_param.lower() == 'true'))
+        
+        # Поиск по username или email
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) | Q(email__icontains=search)
+            )
+        
+        # Сортировка
+        ordering = request.query_params.get('ordering', 'username')
+        if ordering.lstrip('-') in ['username', 'email', 'date_joined', 'last_login']:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('username')
+        
+        # Пагинация
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        
+        if page is not None:
+            serializer = UserSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = UserSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RegistrationConfirmView(GenericAPIView):
@@ -457,3 +546,130 @@ class ConfirmPasswordChangeView(GenericAPIView):
             confirmation.delete()  # Удаляем использованный код
             return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для управления пользователями администратором.
+    
+    Предоставляет полный CRUD для пользователей, доступный только администраторам.
+    """
+    
+    permission_classes = [permissions.IsAdminUser]
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    lookup_field = 'id'
+    pagination_class = StudentsPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['username', 'email']
+    ordering_fields = ['username', 'email', 'date_joined', 'last_login']
+    ordering = ['username']
+    
+    def get_serializer_class(self):
+        """Возвращает соответствующий сериализатор в зависимости от действия."""
+        if self.action == 'create':
+            return AdminCreateUserSerializer
+        elif self.action in ['update', 'partial_update']:
+            return AdminUpdateUserSerializer
+        elif self.action == 'bulk_operation':
+            return BulkUserOperationSerializer
+        return UserSerializer
+    
+    def get_queryset(self):
+        """Возвращает queryset с возможностью фильтрации."""
+        queryset = User.objects.all()
+        
+        # Фильтр по роли
+        role = self.request.query_params.get('role')
+        if role:
+            queryset = queryset.filter(role=role)
+
+        is_active_param = self.request.query_params.get('is_active', "False")
+        
+        if is_active_param is not None and is_active_param.lower() in ['true', 'false']:
+            if is_active_param.lower() == 'true': queryset = queryset.filter(is_active=True)
+        else:
+            queryset = queryset.filter(is_active=True)
+        
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) | Q(email__icontains=search)
+            )
+        
+        return queryset.order_by('username')
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Получение детальной информации о пользователе."""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Удаление пользователя."""
+        instance = self.get_object()
+        
+        # Защита от удаления самого себя
+        if instance.id == request.user.id:
+            return Response(
+                {"error": "Нельзя удалить свой собственный аккаунт"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        instance.delete()
+        return Response(
+            {"message": "Пользователь успешно удалён"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+    
+    @action(detail=False, methods=['post'], serializer_class=BulkUserOperationSerializer)
+    def bulk_operation(self, request):
+        """
+        Массовые операции с пользователями.
+        
+        Действия:
+        - activate: активация пользователей
+        - deactivate: деактивация пользователей
+        - delete: удаление пользователей
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user_ids = serializer.validated_data['user_ids']
+        action_type = serializer.validated_data['action']
+        
+        users = User.objects.filter(id__in=user_ids)
+        
+        # Защита от удаления/деактивации самого себя
+        if request.user.id in user_ids and action_type in ['delete', 'deactivate']:
+            return Response(
+                {"error": "Нельзя выполнить это действие со своим собственным аккаунтом"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if action_type == 'activate':
+            updated = users.update(is_active=True)
+            return Response({
+                "message": f"Активировано пользователей: {updated}",
+                "updated_count": updated
+            }, status=status.HTTP_200_OK)
+        
+        elif action_type == 'deactivate':
+            updated = users.update(is_active=False)
+            return Response({
+                "message": f"Деактивировано пользователей: {updated}",
+                "updated_count": updated
+            }, status=status.HTTP_200_OK)
+        
+        elif action_type == 'delete':
+            count = users.count()
+            users.delete()
+            return Response({
+                "message": f"Удалено пользователей: {count}",
+                "deleted_count": count
+            }, status=status.HTTP_200_OK)
+        
+        return Response(
+            {"error": "Неизвестное действие"},
+            status=status.HTTP_400_BAD_REQUEST
+        )

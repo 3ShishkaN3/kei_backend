@@ -1134,13 +1134,7 @@ def migrate_section_item_views(sqlite_conn):
 
 def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
     print(f"  Мигрирую LearningStats для {user.username}")
-
-    # Миграция очков опыта
-    sqlite_cursor.execute("SELECT experience_points FROM kei_school_userexperience WHERE user_id = ?", (user.id,))
-    exp_data = sqlite_cursor.fetchone()
-    if exp_data:
-        learning_stats.experience_points = exp_data['experience_points']
-        print(f"    - Мигрировано очков опыта: {learning_stats.experience_points}")
+    print("    - Очки опыта будут пересчитаны на основе прогресса после миграции тестов")
 
     # Расчет статистики по дням обучения (streaks)
     sqlite_cursor.execute("""
@@ -1189,6 +1183,34 @@ def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
 
     learning_stats.save()
 
+
+def recalculate_user_experience_from_progress(user, learning_stats=None):
+    from progress_service.models import LearningStats, TestProgress
+
+    if learning_stats is None:
+        learning_stats, _ = LearningStats.objects.get_or_create(
+            user=user,
+            defaults={'level': 1}
+        )
+
+    total_experience = 0
+
+    passed_tests = TestProgress.objects.filter(user=user, status='passed')
+    for test_progress in passed_tests:
+        score = test_progress.best_score if test_progress.best_score is not None else test_progress.last_score
+        if score is None:
+            continue
+        try:
+            total_experience += int(score)
+        except (ValueError, TypeError):
+            continue
+
+    total_experience = max(total_experience, 0)
+
+    learning_stats.experience_points = total_experience
+    learning_stats.save(update_fields=['experience_points', 'updated_at'])
+    print(f"    - Пересчитан опыт по новым правилам: {learning_stats.experience_points}")
+
 def migrate_progress_service(sqlite_conn):
     """Миграция прогресса пользователей из старой БД"""
     print("\nНачинаю миграцию progress_service...")
@@ -1223,6 +1245,7 @@ def migrate_progress_service(sqlite_conn):
         
         # Мигрируем прогресс по тестам
         migrate_user_test_progress(sqlite_cursor, student, user_progress)
+        recalculate_user_experience_from_progress(student, learning_stats)
         
         # Мигрируем прогресс по секциям
         migrate_user_section_progress(sqlite_cursor, student, user_progress)

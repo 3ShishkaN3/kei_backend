@@ -326,3 +326,82 @@ class EmptySerializer(serializers.Serializer):
     Используется для logout и других операций, не требующих входных данных.
     """
     pass
+
+
+class AdminCreateUserSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для создания пользователей администратором.
+    
+    Позволяет администраторам создавать пользователей с указанием роли
+    и статуса активности без подтверждения email.
+    """
+    
+    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+
+    class Meta:
+        model = User
+        fields = ("username", "email", "password", "role", "is_active")
+        extra_kwargs = {
+            "email": {"required": True},
+            "role": {"required": False},
+            "is_active": {"required": False},
+        }
+
+    def validate_email(self, value):
+        """Нормализует email к нижнему регистру."""
+        return value.lower()
+
+    def create(self, validated_data):
+        """Создает пользователя с указанными параметрами."""
+        password = validated_data.pop("password")
+        user = User.objects.create_user(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+
+class AdminUpdateUserSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для обновления пользователей администратором.
+    """
+    
+    password = serializers.CharField(write_only=True, required=False, validators=[validate_password])
+
+    class Meta:
+        model = User
+        fields = ("username", "email", "password", "role", "is_active")
+
+    def validate_email(self, value):
+        """Нормализует email к нижнему регистру."""
+        return value.lower()
+
+    def update(self, instance, validated_data):
+        """Обновляет пользователя."""
+        password = validated_data.pop("password", None)
+        if password:
+            instance.set_password(password)
+        return super().update(instance, validated_data)
+
+
+class BulkUserOperationSerializer(serializers.Serializer):
+    """
+    Сериализатор для массовых операций с пользователями.
+    """
+    
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        min_length=1,
+        help_text="Список ID пользователей"
+    )
+    action = serializers.ChoiceField(
+        choices=["activate", "deactivate", "delete"],
+        help_text="Действие: activate, deactivate, delete"
+    )
+
+    def validate_user_ids(self, value):
+        """Проверяет, что пользователи существуют."""
+        existing_ids = User.objects.filter(id__in=value).values_list('id', flat=True)
+        missing_ids = set(value) - set(existing_ids)
+        if missing_ids:
+            raise serializers.ValidationError(f"Пользователи с ID {missing_ids} не найдены.")
+        return value

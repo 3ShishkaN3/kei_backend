@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'dict_service',
     'progress_service',
     'calendar_service',
+    'achievement_service',
 ]
 
 MIDDLEWARE = [

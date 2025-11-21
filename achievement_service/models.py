@@ -7,7 +7,7 @@ class Achievement(models.Model):
     """
     title = models.CharField(max_length=255, verbose_name="Название")
     description = models.TextField(verbose_name="Описание")
-    icon = models.CharField(max_length=255, verbose_name="Иконка (URL или имя)", blank=True)
+    icon = models.ImageField(upload_to='achievements/icons/', verbose_name="Иконка", blank=True, null=True)
     xp_reward = models.PositiveIntegerField(default=0, verbose_name="Награда (XP)")
     
     # Структура графа для визуального редактора на фронтенде (Svelte Flow)

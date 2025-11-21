@@ -20,9 +20,17 @@ class RuleEngine:
             return True
 
         try:
-            return json_logic.jsonLogic(achievement.compiled_rules, context)
+            # Debug logging
+            print(f"[DEBUG] Evaluating achievement {achievement.id}: {achievement.title}")
+            print(f"[DEBUG] Context: {context}")
+            
+            result = json_logic.jsonLogic(achievement.compiled_rules, context)
+            print(f"[DEBUG] Result: {result}")
+            return result
         except Exception as e:
             print(f"Error evaluating achievement {achievement.id}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     @staticmethod
@@ -83,7 +91,10 @@ class RuleEngine:
                     if value is None: # "Any"
                         continue
                     # Value in context might be int, value in params might be string/int
+                    # Try to get from top-level context, then from event data
                     ctx_val = context.get(key)
+                    if ctx_val is None and 'event' in context:
+                        ctx_val = context['event'].get(key)
                     if str(ctx_val) != str(value):
                         match = False
                         break

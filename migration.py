@@ -1678,6 +1678,314 @@ def update_user_overall_progress(user, user_progress):
           f"тестов={user_progress.total_tests_passed}")
 
 
+def migrate_achievements(sqlite_conn):
+    print("\nНачинаю миграцию достижений...")
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    from achievement_service.models import Achievement, UserAchievement
+    
+    OLD_MEDIA_ROOT = 'to_migrate/media'
+    NEW_MEDIA_ROOT = 'media'
+    
+    # Hardcoded achievements based on legacy DB
+    # Creating rule_graph with trigger and condition nodes
+    # NOTE: lesson_id values updated to match new PostgreSQL database
+    achievements_data = [
+        {
+            'id': 4,
+            'title': 'Первопроходец',
+            'description': 'Прохождение первого урока на 100％',
+            'xp_reward': 10,
+            'icon_src': 'achivement_icons/photo_2024-08-17_10-38-56.jpg',
+            'rule_graph': {
+                'nodes': [
+                    {
+                        'id': 'trigger-1',
+                        'type': 'trigger',
+                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
+                        'position': {'x': 100, 'y': 100}
+                    },
+                    {
+                        'id': 'condition-1',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 4  # Урок 1 в новой БД
+                        },
+                        'position': {'x': 100, 'y': 200}
+                    },
+                    {
+                        'id': 'condition-2',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 1  # Введение
+                        },
+                        'position': {'x': 300, 'y': 200}
+                    },
+                    {
+                        'id': 'logic-1',
+                        'type': 'logic',
+                        'data': {
+                            'logic_type': 'OR'
+                        },
+                        'position': {'x': 200, 'y': 350}
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'trigger-1',
+                        'target': 'condition-1'
+                    },
+                    {
+                        'id': 'e2',
+                        'source': 'trigger-1',
+                        'target': 'condition-2'
+                    },
+                    {
+                        'id': 'e3',
+                        'source': 'condition-1',
+                        'target': 'logic-1'
+                    },
+                    {
+                        'id': 'e4',
+                        'source': 'condition-2',
+                        'target': 'logic-1'
+                    }
+                ]
+            }
+        },
+        {
+            'id': 6,
+            'title': 'Выжить в Японии',
+            'description': 'Пройти 18 уроков',
+            'xp_reward': 100,
+            'icon_src': 'achivement_icons/photo_2024-08-17_11-46-50.jpg',
+            'rule_graph': {
+                'nodes': [
+                    {
+                        'id': 'trigger-1',
+                        'type': 'trigger',
+                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
+                        'position': {'x': 100, 'y': 100}
+                    },
+                    {
+                        'id': 'condition-1',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 25  # Урок 18 в новой БД
+                        },
+                        'position': {'x': 100, 'y': 200}
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'trigger-1',
+                        'target': 'condition-1'
+                    }
+                ]
+            }
+        },
+        {
+            'id': 7,
+            'title': 'Тысяча и один иероглиф',
+            'description': 'Изучить 100 иероглифов',
+            'xp_reward': 150,
+            'icon_src': 'achivement_icons/photo_2024-08-17_11-47-01.jpg',
+            'rule_graph': {
+                'nodes': [
+                    {
+                        'id': 'trigger-1',
+                        'type': 'trigger',
+                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
+                        'position': {'x': 100, 'y': 100}
+                    },
+                    {
+                        'id': 'condition-1',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 34  # Урок 27 в новой БД
+                        },
+                        'position': {'x': 100, 'y': 200}
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'trigger-1',
+                        'target': 'condition-1'
+                    }
+                ]
+            }
+        },
+        {
+            'id': 8,
+            'title': 'Это база! ',
+            'description': 'Выучить хирагану и катакану',
+            'xp_reward': 10,
+            'icon_src': 'achivement_icons/photo_14_2024-08-17_11-53-35_wq0TlpT.jpg',
+            'rule_graph': {
+                'nodes': [
+                    {
+                        'id': 'trigger-1',
+                        'type': 'trigger',
+                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
+                        'position': {'x': 100, 'y': 100}
+                    },
+                    {
+                        'id': 'condition-1',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 4  # Урок 1 в новой БД
+                        },
+                        'position': {'x': 100, 'y': 200}
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'trigger-1',
+                        'target': 'condition-1'
+                    }
+                ]
+            }
+        },
+        {
+            'id': 9,
+            'title': 'Опять твои китайцы!',
+            'description': 'Пройти первый диалог с виртуальным сенсеем',
+            'xp_reward': 15,
+            'icon_src': 'achivement_icons/photo_11_2024-08-17_11-53-35.jpg',
+            'rule_graph': {
+                'nodes': [
+                    {
+                        'id': 'trigger-1',
+                        'type': 'trigger',
+                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
+                        'position': {'x': 100, 'y': 100}
+                    },
+                    {
+                        'id': 'condition-1',
+                        'type': 'condition',
+                        'data': {
+                            'variable': 'event.lesson_id',
+                            'operator': '==',
+                            'value': 4  # Урок 1 в новой БД
+                        },
+                        'position': {'x': 100, 'y': 200}
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'trigger-1',
+                        'target': 'condition-1'
+                    }
+                ]
+            }
+        }
+    ]
+    
+    achievement_map = {} # old_id -> new_achievement_obj
+    
+    print("Создаю/обновляю достижения...")
+    for ach_data in achievements_data:
+        # 1. Copy Icon
+        old_icon_path = ach_data['icon_src']
+        new_icon_db_path = None
+        
+        if old_icon_path:
+            source_path = os.path.join(OLD_MEDIA_ROOT, old_icon_path)
+            # New path: achievements/icons/<filename>
+            filename = os.path.basename(old_icon_path)
+            new_rel_path = os.path.join('achievements', 'icons', filename)
+            dest_path = os.path.join(NEW_MEDIA_ROOT, new_rel_path)
+            
+            if os.path.exists(source_path):
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                shutil.copy2(source_path, dest_path)
+                new_icon_db_path = new_rel_path.replace('\\', '/') # Ensure forward slashes for DB
+                print(f"  Скопирована иконка для '{ach_data['title']}'")
+            else:
+                print(f"  Иконка не найдена: {source_path}")
+        
+        # 2. Create Achievement with rule_graph
+        # The save() method will automatically compile the graph into triggers and compiled_rules
+        achievement, created = Achievement.objects.update_or_create(
+            title=ach_data['title'],
+            defaults={
+                'description': ach_data['description'],
+                'xp_reward': ach_data['xp_reward'],
+                'icon': new_icon_db_path,
+                'rule_graph': ach_data['rule_graph'],
+                'is_active': True
+            }
+        )
+        
+        achievement_map[ach_data['id']] = achievement
+        
+        if created:
+            print(f"  Создано достижение: {achievement.title}")
+        else:
+            print(f"  Обновлено достижение: {achievement.title}")
+
+    print("\nМигрирую полученные достижения пользователей...")
+    sqlite_cursor.execute("SELECT * FROM kei_school_userachievement")
+    old_user_achievements = sqlite_cursor.fetchall()
+    
+    count_awarded = 0
+    for ua_data in old_user_achievements:
+        old_ach_id = ua_data['achievement_id']
+        user_id = ua_data['user_id']
+        achieved_at = ua_data['achieved_at'] # String format likely
+        
+        if old_ach_id not in achievement_map:
+            print(f"  Пропущено: достижение с ID {old_ach_id} не в списке миграции.")
+            continue
+            
+        try:
+            user = User.objects.get(id=user_id)
+            achievement = achievement_map[old_ach_id]
+            
+            # Parse date if needed, but Django usually handles string dates well if format is standard ISO
+            # If achieved_at is string "YYYY-MM-DD HH:MM:SS.ssssss", Django might need help if it's not timezone aware
+            # Let's try direct assignment first
+            
+            ua, created = UserAchievement.objects.get_or_create(
+                user=user,
+                achievement=achievement,
+            )
+            
+            if created:
+                # Manually set awarded_at since auto_now_add=True prevents it in create() usually? 
+                # Actually auto_now_add sets it on creation, we need to update it to match legacy
+                ua.awarded_at = achieved_at
+                ua.save()
+                count_awarded += 1
+                print(f"  Выдано '{achievement.title}' пользователю {user.username}")
+            else:
+                 # Update date just in case
+                 ua.awarded_at = achieved_at
+                 ua.save()
+        
+        except User.DoesNotExist:
+            print(f"  Пользователь с ID {user_id} не найден.")
+        except Exception as e:
+            print(f"  Ошибка при выдаче достижения: {e}")
+            
+    print(f"Миграция достижений завершена. Выдано: {count_awarded}")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -1696,8 +2004,9 @@ if __name__ == '__main__':
         migrate_test_submissions(sqlite_conn)
         migrate_section_item_views(sqlite_conn)
         migrate_progress_service(sqlite_conn)
+        migrate_achievements(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()
     if postgres_conn:
-        postgres_conn.close() 
+        postgres_conn.close()

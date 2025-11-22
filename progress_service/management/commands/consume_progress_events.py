@@ -1,4 +1,5 @@
 import json
+import time
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
@@ -10,6 +11,7 @@ from progress_service.models import (
 from course_service.models import Course, CourseEnrollment
 from lesson_service.models import Lesson, Section, SectionItem
 from kafka import KafkaConsumer
+from kafka.errors import KafkaError
 from decouple import config
 from progress_service.tasks import grade_free_text_submission
 
@@ -21,48 +23,94 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=lambda v: [s.strip() for s in v.split(',')])
-        
-        consumer = KafkaConsumer(
-            'progress_events', 
-            bootstrap_servers=bootstrap_servers,
-            auto_offset_reset='earliest',
-            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            session_timeout_ms=30000,
-            heartbeat_interval_ms=3000
-        )
-        
-        self.stdout.write(self.style.SUCCESS(f"Начало прослушивания топика 'progress_events' с серверами: {bootstrap_servers}..."))
-        
-        for message in consumer:
-            data = message.value
-            event_type = data.get('type')
-            user_id = data.get('user_id')
-            
-            self.stdout.write(f"Получено событие: {event_type} для пользователя {user_id}")
-            
+        group_id = config('KAFKA_CONSUMER_GROUP', default='progress_consumer')
+
+        # Подключаемся в цикле с реконнектом при ошибках подключения/работы с Kafka
+        while True:
+            consumer = None
             try:
-                user = User.objects.get(pk=user_id)
-            except User.DoesNotExist:
-                self.stdout.write(f"Пользователь с id {user_id} не найден")
+                consumer = KafkaConsumer(
+                    'progress_events',
+                    bootstrap_servers=bootstrap_servers,
+                    group_id=group_id,
+                    auto_offset_reset='earliest',
+                    # Не десериализуем автоматически — будем обрабатывать JSON вручную,
+                    # чтобы пропускать некорректные сообщения без падения consumer.
+                    session_timeout_ms=30000,
+                    heartbeat_interval_ms=3000
+                )
+
+                self.stdout.write(self.style.SUCCESS(f"Начало прослушивания топика 'progress_events' с серверами: {bootstrap_servers} (group: {group_id})..."))
+
+                for message in consumer:
+                    raw_value = message.value
+                    # Попытка безопасной десериализации JSON с обработкой ошибок
+                    try:
+                        if isinstance(raw_value, (bytes, bytearray)):
+                            text = raw_value.decode('utf-8')
+                            data = json.loads(text)
+                        elif isinstance(raw_value, str):
+                            data = json.loads(raw_value)
+                        else:
+                            # Если сообщение уже разобрано клиентом, используем как есть
+                            data = raw_value
+                    except json.JSONDecodeError as je:
+                        self.stdout.write(
+                            f"JSON decode error for message (partition={getattr(message, 'partition', '?')} offset={getattr(message, 'offset', '?')}): {je}. Пропускаю сообщение."
+                        )
+                        continue
+
+                    event_type = data.get('type')
+                    user_id = data.get('user_id')
+                    
+                    self.stdout.write(f"Получено событие: {event_type} для пользователя {user_id}")
+                    
+                    try:
+                        user = User.objects.get(pk=user_id)
+                    except User.DoesNotExist:
+                        self.stdout.write(f"Пользователь с id {user_id} не найден")
+                        continue
+                    
+                    try:
+                        with transaction.atomic():
+                            if event_type == 'lesson_completed':
+                                self.handle_lesson_completed(data, user)
+                            elif event_type == 'section_completed':
+                                self.handle_section_completed(data, user)
+                            elif event_type == 'test_submitted':
+                                self.handle_test_submitted(data, user)
+                            elif event_type == 'test_graded':
+                                self.handle_test_graded(data, user)
+                            elif event_type == 'material_viewed':
+                                self.handle_material_viewed(data, user)
+                            else:
+                                self.stdout.write(f"Неизвестный тип события: {event_type}")
+                    except Exception as e:
+                        # Любые другие ошибки при обработке сообщения — логируем и продолжаем
+                        self.stdout.write(f"Ошибка обработки события {event_type}: {e}")
+                        # не прерываем весь цикл, продолжаем слушать
+                        continue
+
+            except KafkaError as ke:
+                # Ошибки Kafka — пытаемся реконнектиться
+                self.stdout.write(f"KafkaError в consumer: {ke}. Попробую реконнект через 5 секунд...")
+                try:
+                    if consumer is not None:
+                        consumer.close()
+                except Exception:
+                    pass
+                time.sleep(5)
                 continue
-            
-            try:
-                with transaction.atomic():
-                    if event_type == 'lesson_completed':
-                        self.handle_lesson_completed(data, user)
-                    elif event_type == 'section_completed':
-                        self.handle_section_completed(data, user)
-                    elif event_type == 'test_submitted':
-                        self.handle_test_submitted(data, user)
-                    elif event_type == 'test_graded':
-                        self.handle_test_graded(data, user)
-                    elif event_type == 'material_viewed':
-                        self.handle_material_viewed(data, user)
-                    else:
-                        self.stdout.write(f"Неизвестный тип события: {event_type}")
-                        
             except Exception as e:
-                self.stdout.write(f"Ошибка обработки события {event_type}: {e}")
+                # Ошибки при создании consumer или неожиданные ошибки — логируем и реконнектимся
+                self.stdout.write(f"Unexpected error in consumer loop: {e}. Реконнект через 5 секунд...")
+                try:
+                    if consumer is not None:
+                        consumer.close()
+                except Exception:
+                    pass
+                time.sleep(5)
+                continue
 
     def handle_lesson_completed(self, data, user):
         """Обработка завершения урока"""

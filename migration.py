@@ -21,6 +21,7 @@ from lesson_service.models import Lesson, Section, LessonCompletion
 from dict_service.models import DictionarySection, DictionaryEntry, UserLearnedEntry
 from material_service.models import TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial
 from lesson_service.models import SectionItem
+from progress_service.models import LearningStats
 
 SQLITE_DB_PATH = 'to_migrate/db.sqlite3'
 
@@ -1986,6 +1987,26 @@ def migrate_achievements(sqlite_conn):
     print(f"Миграция достижений завершена. Выдано: {count_awarded}")
 
 
+def migrate_user_levels_and_coins(sqlite_conn):
+    print("\nНачинаю миграцию уровней и монеток...")
+    
+    stats_list = LearningStats.objects.all()
+    count = 0
+    for stats in stats_list:
+        # 1. Монеты = Опыт (так как раньше монет не было)
+        stats.coins = stats.experience_points
+        
+        # 2. Пересчет уровня
+        new_level = stats.calculate_level()
+        stats.level = new_level
+        
+        stats.save()
+        count += 1
+        print(f"Обновлен пользователь {stats.user.username}: XP={stats.experience_points}, Coins={stats.coins}, Level={stats.level}")
+
+    print(f"Миграция уровней и монеток завершена. Обновлено: {count}")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -2005,6 +2026,7 @@ if __name__ == '__main__':
         migrate_section_item_views(sqlite_conn)
         migrate_progress_service(sqlite_conn)
         migrate_achievements(sqlite_conn)
+        migrate_user_levels_and_coins(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()

@@ -281,7 +281,15 @@ class Command(BaseCommand):
             self.stdout.write(f"TestProgress для теста {test_id} и пользователя {user.username} не найден.")
             return
 
-        # 1. Обновляем TestProgress
+        # 1. Рассчитываем прирост опыта (только за улучшение результата)
+        old_best = test_progress.best_score if test_progress.best_score is not None else 0
+        current_score = float(score)
+        xp_gain = 0
+        
+        if current_score > old_best:
+            xp_gain = int(current_score - old_best)
+
+        # 2. Обновляем TestProgress
         test_progress.status = 'passed' if status == 'auto_passed' else 'failed'
         test_progress.last_score = score
         if test_progress.best_score is None or score > test_progress.best_score:
@@ -291,13 +299,14 @@ class Command(BaseCommand):
             test_progress.completed_at = timezone.now()
         test_progress.save()
 
-        # 2. Начисляем очки опыта в LearningStats
-        try:
-            stats, _ = LearningStats.objects.get_or_create(user=user)
-            stats.experience_points += int(score)
-            stats.save()
-        except Exception as e:
-            self.stdout.write(f"Ошибка начисления очков опыта для {user.username}: {e}")
+        # 3. Начисляем очки опыта и монеты в LearningStats
+        if xp_gain > 0:
+            try:
+                stats, _ = LearningStats.objects.get_or_create(user=user)
+                stats.add_experience(xp_gain)
+                self.stdout.write(f"Начислено {xp_gain} XP пользователю {user.username}")
+            except Exception as e:
+                self.stdout.write(f"Ошибка начисления очков опыта для {user.username}: {e}")
 
         # 3. Запускаем стандартную цепочку обновления прогрессов
         self.update_section_progress(user, data.get('section_id'))

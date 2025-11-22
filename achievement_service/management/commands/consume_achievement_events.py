@@ -62,6 +62,17 @@ class Command(BaseCommand):
                 
                 for ua in new_achievements:
                     self.stdout.write(self.style.SUCCESS(f"ВЫДАНО ДОСТИЖЕНИЕ: {ua.achievement.title} пользователю {user.username}"))
+                    
+                    # Начисляем награду за достижение
+                    try:
+                        stats, _ = LearningStats.objects.get_or_create(user=user)
+                        stats.add_experience(ua.achievement.xp_reward)
+                        stats.total_achievements += 1
+                        stats.save()
+                        self.stdout.write(f"Начислено {ua.achievement.xp_reward} XP за достижение.")
+                    except Exception as e:
+                        self.stdout.write(self.style.ERROR(f"Ошибка начисления награды за достижение: {e}"))
+
                     # Тут можно отправить уведомление в Kafka или WebSocket
                     
             except User.DoesNotExist:

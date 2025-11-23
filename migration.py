@@ -2014,8 +2014,10 @@ def migrate_bonus_service(sqlite_conn):
     from bonus_service.models import Bonus
     from material_service.models import VideoMaterial
     from auth_service.models import User
+    import shutil
     
     OLD_MEDIA_ROOT = 'to_migrate/media'
+    NEW_MEDIA_ROOT = settings.MEDIA_ROOT
     
     print("Мигрирую бонусы...")
     sqlite_cursor.execute("SELECT * FROM kei_school_bonus")
@@ -2027,14 +2029,33 @@ def migrate_bonus_service(sqlite_conn):
             new_video_material = None
             
             if old_video_path:
-                # Try to find the migrated video material
-                # The migrate_material_service normalized the path and put it in material_video/
-                # Let's try to match by filename end
-                filename = os.path.basename(old_video_path)
-                new_video_material = VideoMaterial.objects.filter(video_file__endswith=filename).first()
+                # Full path to old file
+                old_file_full_path = os.path.join(OLD_MEDIA_ROOT, old_video_path)
                 
-                if not new_video_material:
-                    print(f"  Видео материал для бонуса '{bonus_data['title']}' не найден (файл: {filename}).")
+                if os.path.exists(old_file_full_path):
+                    # Extract just filename
+                    filename = os.path.basename(old_video_path)
+                    
+                    # Construct new path: material_video/filename (strip bonuses_videos/ prefix)
+                    new_relative_path = f"material_video/{filename}"
+                    new_file_full_path = os.path.join(NEW_MEDIA_ROOT, new_relative_path)
+                    
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(new_file_full_path), exist_ok=True)
+                    
+                    # Copy file
+                    shutil.copy2(old_file_full_path, new_file_full_path)
+                    print(f"  Скопирован видео файл: {old_video_path} -> {new_relative_path}")
+                    
+                    # Create VideoMaterial with correct path
+                    new_video_material = VideoMaterial.objects.create(
+                        title=f"Бонус: {bonus_data['title']}",
+                        source_type='file',
+                        video_file=new_relative_path,
+                        created_by=User.objects.filter(is_staff=True).first()
+                    )
+                else:
+                    print(f"  Видео файл для бонуса '{bonus_data['title']}' не найден по пути: {old_file_full_path}")
             
             Bonus.objects.create(
                 title=bonus_data['title'],
@@ -2049,6 +2070,7 @@ def migrate_bonus_service(sqlite_conn):
             print(f"Ошибка миграции бонуса {bonus_data.get('title')}: {e}")
 
     print("Миграция bonus_service завершена.")
+
 
 
 if __name__ == '__main__':

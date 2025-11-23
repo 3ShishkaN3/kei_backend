@@ -6,10 +6,14 @@ from .models import Bonus, UserBonus
 from .serializers import BonusSerializer, BuyBonusSerializer
 from progress_service.models import LearningStats
 
-class BonusViewSet(viewsets.ReadOnlyModelViewSet):
+class BonusViewSet(viewsets.ModelViewSet):
     queryset = Bonus.objects.all()
     serializer_class = BonusSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()] # Or custom IsTeacher permission
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         # Only show video bonuses for now as per requirement, or all?

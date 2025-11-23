@@ -32,6 +32,7 @@ urlpatterns = [
     path(f"{BASE_URL}/v{API_VERSION}/progress/", include("progress_service.urls")),
     path(f"{BASE_URL}/v{API_VERSION}/calendar/", include("calendar_service.urls")),
     path(f"{BASE_URL}/v{API_VERSION}/achievements/", include("achievement_service.urls")),
+    path(f"{BASE_URL}/v{API_VERSION}/bonuses/", include("bonus_service.urls")),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

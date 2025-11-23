@@ -2007,6 +2007,50 @@ def migrate_user_levels_and_coins(sqlite_conn):
     print(f"Миграция уровней и монеток завершена. Обновлено: {count}")
 
 
+def migrate_bonus_service(sqlite_conn):
+    print("\nНачинаю миграцию bonus_service...")
+    sqlite_cursor = sqlite_conn.cursor()
+    
+    from bonus_service.models import Bonus
+    from material_service.models import VideoMaterial
+    from auth_service.models import User
+    
+    OLD_MEDIA_ROOT = 'to_migrate/media'
+    
+    print("Мигрирую бонусы...")
+    sqlite_cursor.execute("SELECT * FROM kei_school_bonus")
+    old_bonuses = sqlite_cursor.fetchall()
+    
+    for bonus_data in old_bonuses:
+        try:
+            old_video_path = bonus_data['video']
+            new_video_material = None
+            
+            if old_video_path:
+                # Try to find the migrated video material
+                # The migrate_material_service normalized the path and put it in material_video/
+                # Let's try to match by filename end
+                filename = os.path.basename(old_video_path)
+                new_video_material = VideoMaterial.objects.filter(video_file__endswith=filename).first()
+                
+                if not new_video_material:
+                    print(f"  Видео материал для бонуса '{bonus_data['title']}' не найден (файл: {filename}).")
+            
+            Bonus.objects.create(
+                title=bonus_data['title'],
+                description=bonus_data['description'],
+                price=100, # Default as requested
+                bonus_type='video',
+                video_material=new_video_material
+            )
+            print(f"Создан бонус '{bonus_data['title']}'.")
+            
+        except Exception as e:
+            print(f"Ошибка миграции бонуса {bonus_data.get('title')}: {e}")
+
+    print("Миграция bonus_service завершена.")
+
+
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -2026,6 +2070,7 @@ if __name__ == '__main__':
         migrate_section_item_views(sqlite_conn)
         migrate_progress_service(sqlite_conn)
         migrate_achievements(sqlite_conn)
+        migrate_bonus_service(sqlite_conn)
         migrate_user_levels_and_coins(sqlite_conn)
 
     if sqlite_conn:

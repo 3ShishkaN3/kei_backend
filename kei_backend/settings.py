@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'progress_service',
     'calendar_service',
     'achievement_service',
+    'bonus_service',
 ]
 
 MIDDLEWARE = [

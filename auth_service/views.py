@@ -17,8 +17,6 @@ from .models import ConfirmationCode, User
 from .tasks import send_confirmation_email_task
 from django.middleware.csrf import get_token
 from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -317,7 +315,12 @@ class RegistrationConfirmView(GenericAPIView):
             user.is_active = True  # Активируем аккаунт
             user.save()
             confirmation.delete()  # Удаляем использованный код
-            return Response({"message": "Email успешно подтверждён."}, status=status.HTTP_200_OK)
+            
+            # Автоматически логиним пользователя
+            user.backend = 'auth_service.backends.EmailOrUsernameModelBackend'
+            login(request, user)
+            
+            return Response({"message": "Email успешно подтверждён. Вы вошли в систему."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -325,7 +328,7 @@ class RequestPasswordResetView(GenericAPIView):
     """
     Представление для запроса сброса пароля.
     
-    Отправляет код подтверждения на email для сброса пароля.
+    Отправляет код подтверждения на email для смены пароля.
     """
     
     serializer_class = RequestPasswordResetSerializer

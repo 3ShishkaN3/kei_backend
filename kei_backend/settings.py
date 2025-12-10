@@ -64,9 +64,7 @@ INSTALLED_APPS = [
     'material_service',
     'dict_service',
     'progress_service',
-    'calendar_service',
-    'achievement_service',
-    'bonus_service',
+    'notification_service',
 ]
 
 MIDDLEWARE = [
@@ -171,7 +169,6 @@ CSRF_TRUSTED_ORIGINS = [
 
 
 AUTHENTICATION_BACKENDS = [
-    'axes.backends.AxesStandaloneBackend',
     'auth_service.backends.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
@@ -239,22 +236,3 @@ LOGGING = {
     },
 }
 
-
-# Sentry integration (reads SENTRY_DSN from environment / .env)
-try:
-    import sentry_sdk
-    from sentry_sdk.integrations.django import DjangoIntegration
-    SENTRY_DSN = config('SENTRY_DSN', default='')
-    if SENTRY_DSN:
-        sentry_sdk.init(
-            dsn=SENTRY_DSN,
-            integrations=[DjangoIntegration()],
-            send_default_pii=True,
-            # set traces_sample_rate to a low value or 0.0 unless you want performance tracing
-            traces_sample_rate=0.0,
-        )
-except Exception:
-    # don't break the app if sentry isn't installed or configuration fails
-    pass
-
-#

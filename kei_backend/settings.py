@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'material_service',
     'dict_service',
     'progress_service',
+    'notification_service',
 ]
 
 MIDDLEWARE = [

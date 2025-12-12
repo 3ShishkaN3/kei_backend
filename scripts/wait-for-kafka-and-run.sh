@@ -3,7 +3,7 @@
 set -e
 
 KAFKA_HOST="kafka"
-KAFKA_PORT="9092"
+KAFKA_PORT="29092"
 CMD="$@"
 
 echo "Waiting for Kafka at $KAFKA_HOST:$KAFKA_PORT..."

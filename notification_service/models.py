@@ -7,7 +7,15 @@ class Notification(models.Model):
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notifications', verbose_name='Получатель')
 # Create your models here.
     class NotificationType(models.TextChoices):
+        # Для ученика
         NEW_LESSON_AVAILABLE = 'NEW_LESSON_AVAILABLE', 'Новый урок доступен'
+        NEW_MATERIAL_IN_COURSE = 'NEW_MATERIAL_IN_COURSE', 'Новый материал в курсе'
+        TEST_GRADED = 'TEST_GRADED', 'Тест проверен'
+        COURSE_COMPLETED = 'COURSE_COMPLETED', 'Курс пройден'
+
+        # Для учителя
+        STUDENT_ENROLLED = 'STUDENT_ENROLLED', 'Новый ученик на курсе'
+        SUBMISSION_REQUIRES_GRADING = 'SUBMISSION_REQUIRES_GRADING', 'Тест требует проверки'
     type = models.CharField(max_length = 50, choices = NotificationType.choices, verbose_name='Тип')
 
     is_read = models.BooleanField(default= False, verbose_name='Прочитано?')

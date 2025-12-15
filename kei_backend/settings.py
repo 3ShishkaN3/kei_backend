@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'dict_service',
     'progress_service',
     'notification_service',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -98,7 +99,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'kei_backend.wsgi.application'
+ASGI_APPLICATION = 'kei_backend.asgi.application'
 
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.pubsub.RedisPubSubChannelLayer',
+        'CONFIG': {
+            'hosts': [('redis', 6379)], # 'redis' - это имя твоего сервиса Redis в docker-compose.yml
+        },
+    },
+}
 
 DATABASES = {
     'default': {
@@ -142,7 +152,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'auth_service.User'
 
-CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = False
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_SAMESITE = "Lax"

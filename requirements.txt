@@ -14,3 +14,6 @@ drf-nested-routers==0.94.1
 django_cleanup==9.0.0
 django-cors-headers==4.5.0
 google-generativeai==0.7.2
+channels
+channels-redis
+daphne

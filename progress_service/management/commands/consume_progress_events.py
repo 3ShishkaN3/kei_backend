@@ -12,6 +12,7 @@ from lesson_service.models import Lesson, Section, SectionItem
 from kafka import KafkaConsumer
 from decouple import config
 from progress_service.tasks import grade_free_text_submission
+from kei_backend.utils import send_to_kafka  # <--- ДОБАВЛЕН ИМПОРТ
 
 User = get_user_model()
 
@@ -63,6 +64,8 @@ class Command(BaseCommand):
                         
             except Exception as e:
                 self.stdout.write(f"Ошибка обработки события {event_type}: {e}")
+
+    # ... (методы handle_lesson_completed, handle_section_completed, handle_test_submitted остаются без изменений) ...
 
     def handle_lesson_completed(self, data, user):
         """Обработка завершения урока"""
@@ -242,6 +245,21 @@ class Command(BaseCommand):
         if test_progress.status == 'passed' and not test_progress.completed_at:
             test_progress.completed_at = timezone.now()
         test_progress.save()
+
+        # --- ОТПРАВКА УВЕДОМЛЕНИЯ ---
+        notification_payload = {
+            'recipient_id': user.id,
+            'type': 'TEST_GRADED',
+            'data': {
+                'test_title': test_progress.test_title,
+                'score': score,
+                'status': test_progress.status,
+                'course_id': test_progress.course_id,
+            }
+        }
+        send_to_kafka('notification_events', notification_payload)
+        self.stdout.write(f"Событие уведомления TEST_GRADED отправлено для пользователя {user.id}")
+        # -----------------------------
 
         # 2. Начисляем очки опыта в LearningStats
         try:

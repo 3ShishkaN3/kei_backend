@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y netcat-openbsd && rm -rf /var/lib/apt/l
 
 COPY . .
 
+RUN mkdir -p logs
+
 RUN chmod +x /app/scripts/wait-for-kafka-and-run.sh
 
 CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "kei_backend.asgi:application"] 

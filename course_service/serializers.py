@@ -73,27 +73,3 @@ class CourseEnrollmentSerializer(serializers.ModelSerializer):
             'course': {'write_only': True},
             'student': {'write_only': True},
         }
-
-
-class BulkEnrollmentSerializer(serializers.Serializer):
-    """
-    Сериализатор для массовой записи учеников на курс.
-    """
-    
-    student_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        min_length=1,
-        help_text="Список ID учеников для записи на курс"
-    )
-
-
-class BulkLeaveSerializer(serializers.Serializer):
-    """
-    Сериализатор для массового отчисления учеников с курса.
-    """
-    
-    student_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        min_length=1,
-        help_text="Список ID учеников для отчисления с курса"
-    )

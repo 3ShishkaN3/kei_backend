@@ -247,8 +247,7 @@ class LearningStats(models.Model):
     average_daily_time_minutes = models.PositiveIntegerField(default=0, verbose_name="Среднее время в день (минуты)")
     total_achievements = models.PositiveIntegerField(default=0, verbose_name="Всего достижений")
     level = models.PositiveIntegerField(default=1, verbose_name="Уровень")
-    coins = models.PositiveIntegerField(default=0, verbose_name="Монеты (тратятся)")
-    experience_points = models.PositiveIntegerField(default=0, verbose_name="Очки опыта (накапливаются)")
+    experience_points = models.PositiveIntegerField(default=0, verbose_name="Очки опыта")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 
@@ -258,30 +257,3 @@ class LearningStats(models.Model):
 
     def __str__(self):
         return f"Статистика {self.user.username} (Уровень {self.level})"
-
-    def calculate_level(self):
-        """
-        Рассчитывает уровень на основе опыта.
-        Используем степенную функцию: XP = 100 * (Level ^ 1.5)
-        Соответственно: Level = (XP / 100) ^ (1 / 1.5)
-        """
-        if self.experience_points == 0:
-            return 1
-        return int((self.experience_points / 100) ** (1 / 1.5)) + 1
-
-    def add_experience(self, amount):
-        """
-        Добавляет опыт и монеты, пересчитывает уровень.
-        """
-        if amount <= 0:
-            return
-        
-        self.experience_points += amount
-        self.coins += amount
-        
-        new_level = self.calculate_level()
-        if new_level > self.level:
-            self.level = new_level
-            # Тут можно добавить событие повышения уровня, если нужно
-            
-        self.save()

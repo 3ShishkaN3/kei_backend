@@ -21,7 +21,6 @@ from lesson_service.models import Lesson, Section, LessonCompletion
 from dict_service.models import DictionarySection, DictionaryEntry, UserLearnedEntry
 from material_service.models import TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial
 from lesson_service.models import SectionItem
-from progress_service.models import LearningStats
 
 SQLITE_DB_PATH = 'to_migrate/db.sqlite3'
 
@@ -1135,7 +1134,13 @@ def migrate_section_item_views(sqlite_conn):
 
 def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
     print(f"  Мигрирую LearningStats для {user.username}")
-    print("    - Очки опыта будут пересчитаны на основе прогресса после миграции тестов")
+
+    # Миграция очков опыта
+    sqlite_cursor.execute("SELECT experience_points FROM kei_school_userexperience WHERE user_id = ?", (user.id,))
+    exp_data = sqlite_cursor.fetchone()
+    if exp_data:
+        learning_stats.experience_points = exp_data['experience_points']
+        print(f"    - Мигрировано очков опыта: {learning_stats.experience_points}")
 
     # Расчет статистики по дням обучения (streaks)
     sqlite_cursor.execute("""
@@ -1184,34 +1189,6 @@ def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
 
     learning_stats.save()
 
-
-def recalculate_user_experience_from_progress(user, learning_stats=None):
-    from progress_service.models import LearningStats, TestProgress
-
-    if learning_stats is None:
-        learning_stats, _ = LearningStats.objects.get_or_create(
-            user=user,
-            defaults={'level': 1}
-        )
-
-    total_experience = 0
-
-    passed_tests = TestProgress.objects.filter(user=user, status='passed')
-    for test_progress in passed_tests:
-        score = test_progress.best_score if test_progress.best_score is not None else test_progress.last_score
-        if score is None:
-            continue
-        try:
-            total_experience += int(score)
-        except (ValueError, TypeError):
-            continue
-
-    total_experience = max(total_experience, 0)
-
-    learning_stats.experience_points = total_experience
-    learning_stats.save(update_fields=['experience_points', 'updated_at'])
-    print(f"    - Пересчитан опыт по новым правилам: {learning_stats.experience_points}")
-
 def migrate_progress_service(sqlite_conn):
     """Миграция прогресса пользователей из старой БД"""
     print("\nНачинаю миграцию progress_service...")
@@ -1246,7 +1223,6 @@ def migrate_progress_service(sqlite_conn):
         
         # Мигрируем прогресс по тестам
         migrate_user_test_progress(sqlite_cursor, student, user_progress)
-        recalculate_user_experience_from_progress(student, learning_stats)
         
         # Мигрируем прогресс по секциям
         migrate_user_section_progress(sqlite_cursor, student, user_progress)
@@ -1679,400 +1655,6 @@ def update_user_overall_progress(user, user_progress):
           f"тестов={user_progress.total_tests_passed}")
 
 
-def migrate_achievements(sqlite_conn):
-    print("\nНачинаю миграцию достижений...")
-    sqlite_cursor = sqlite_conn.cursor()
-    
-    from achievement_service.models import Achievement, UserAchievement
-    
-    OLD_MEDIA_ROOT = 'to_migrate/media'
-    NEW_MEDIA_ROOT = 'media'
-    
-    # Hardcoded achievements based on legacy DB
-    # Creating rule_graph with trigger and condition nodes
-    # NOTE: lesson_id values updated to match new PostgreSQL database
-    achievements_data = [
-        {
-            'id': 4,
-            'title': 'Первопроходец',
-            'description': 'Прохождение первого урока на 100％',
-            'xp_reward': 10,
-            'icon_src': 'achivement_icons/photo_2024-08-17_10-38-56.jpg',
-            'rule_graph': {
-                'nodes': [
-                    {
-                        'id': 'trigger-1',
-                        'type': 'trigger',
-                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
-                        'position': {'x': 100, 'y': 100}
-                    },
-                    {
-                        'id': 'condition-1',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 4  # Урок 1 в новой БД
-                        },
-                        'position': {'x': 100, 'y': 200}
-                    },
-                    {
-                        'id': 'condition-2',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 1  # Введение
-                        },
-                        'position': {'x': 300, 'y': 200}
-                    },
-                    {
-                        'id': 'logic-1',
-                        'type': 'logic',
-                        'data': {
-                            'logic_type': 'OR'
-                        },
-                        'position': {'x': 200, 'y': 350}
-                    }
-                ],
-                'edges': [
-                    {
-                        'id': 'e1',
-                        'source': 'trigger-1',
-                        'target': 'condition-1'
-                    },
-                    {
-                        'id': 'e2',
-                        'source': 'trigger-1',
-                        'target': 'condition-2'
-                    },
-                    {
-                        'id': 'e3',
-                        'source': 'condition-1',
-                        'target': 'logic-1'
-                    },
-                    {
-                        'id': 'e4',
-                        'source': 'condition-2',
-                        'target': 'logic-1'
-                    }
-                ]
-            }
-        },
-        {
-            'id': 6,
-            'title': 'Выжить в Японии',
-            'description': 'Пройти 18 уроков',
-            'xp_reward': 100,
-            'icon_src': 'achivement_icons/photo_2024-08-17_11-46-50.jpg',
-            'rule_graph': {
-                'nodes': [
-                    {
-                        'id': 'trigger-1',
-                        'type': 'trigger',
-                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
-                        'position': {'x': 100, 'y': 100}
-                    },
-                    {
-                        'id': 'condition-1',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 25  # Урок 18 в новой БД
-                        },
-                        'position': {'x': 100, 'y': 200}
-                    }
-                ],
-                'edges': [
-                    {
-                        'id': 'e1',
-                        'source': 'trigger-1',
-                        'target': 'condition-1'
-                    }
-                ]
-            }
-        },
-        {
-            'id': 7,
-            'title': 'Тысяча и один иероглиф',
-            'description': 'Изучить 100 иероглифов',
-            'xp_reward': 150,
-            'icon_src': 'achivement_icons/photo_2024-08-17_11-47-01.jpg',
-            'rule_graph': {
-                'nodes': [
-                    {
-                        'id': 'trigger-1',
-                        'type': 'trigger',
-                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
-                        'position': {'x': 100, 'y': 100}
-                    },
-                    {
-                        'id': 'condition-1',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 34  # Урок 27 в новой БД
-                        },
-                        'position': {'x': 100, 'y': 200}
-                    }
-                ],
-                'edges': [
-                    {
-                        'id': 'e1',
-                        'source': 'trigger-1',
-                        'target': 'condition-1'
-                    }
-                ]
-            }
-        },
-        {
-            'id': 8,
-            'title': 'Это база! ',
-            'description': 'Выучить хирагану и катакану',
-            'xp_reward': 10,
-            'icon_src': 'achivement_icons/photo_14_2024-08-17_11-53-35_wq0TlpT.jpg',
-            'rule_graph': {
-                'nodes': [
-                    {
-                        'id': 'trigger-1',
-                        'type': 'trigger',
-                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
-                        'position': {'x': 100, 'y': 100}
-                    },
-                    {
-                        'id': 'condition-1',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 4  # Урок 1 в новой БД
-                        },
-                        'position': {'x': 100, 'y': 200}
-                    }
-                ],
-                'edges': [
-                    {
-                        'id': 'e1',
-                        'source': 'trigger-1',
-                        'target': 'condition-1'
-                    }
-                ]
-            }
-        },
-        {
-            'id': 9,
-            'title': 'Опять твои китайцы!',
-            'description': 'Пройти первый диалог с виртуальным сенсеем',
-            'xp_reward': 15,
-            'icon_src': 'achivement_icons/photo_11_2024-08-17_11-53-35.jpg',
-            'rule_graph': {
-                'nodes': [
-                    {
-                        'id': 'trigger-1',
-                        'type': 'trigger',
-                        'data': {'trigger': 'ON_LESSON_COMPLETE'},
-                        'position': {'x': 100, 'y': 100}
-                    },
-                    {
-                        'id': 'condition-1',
-                        'type': 'condition',
-                        'data': {
-                            'variable': 'event.lesson_id',
-                            'operator': '==',
-                            'value': 4  # Урок 1 в новой БД
-                        },
-                        'position': {'x': 100, 'y': 200}
-                    }
-                ],
-                'edges': [
-                    {
-                        'id': 'e1',
-                        'source': 'trigger-1',
-                        'target': 'condition-1'
-                    }
-                ]
-            }
-        }
-    ]
-    
-    achievement_map = {} # old_id -> new_achievement_obj
-    
-    print("Создаю/обновляю достижения...")
-    for ach_data in achievements_data:
-        # 1. Copy Icon
-        old_icon_path = ach_data['icon_src']
-        new_icon_db_path = None
-        
-        if old_icon_path:
-            source_path = os.path.join(OLD_MEDIA_ROOT, old_icon_path)
-            # New path: achievements/icons/<filename>
-            filename = os.path.basename(old_icon_path)
-            new_rel_path = os.path.join('achievements', 'icons', filename)
-            dest_path = os.path.join(NEW_MEDIA_ROOT, new_rel_path)
-            
-            if os.path.exists(source_path):
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                shutil.copy2(source_path, dest_path)
-                new_icon_db_path = new_rel_path.replace('\\', '/') # Ensure forward slashes for DB
-                print(f"  Скопирована иконка для '{ach_data['title']}'")
-            else:
-                print(f"  Иконка не найдена: {source_path}")
-        
-        # 2. Create Achievement with rule_graph
-        # The save() method will automatically compile the graph into triggers and compiled_rules
-        achievement, created = Achievement.objects.update_or_create(
-            title=ach_data['title'],
-            defaults={
-                'description': ach_data['description'],
-                'xp_reward': ach_data['xp_reward'],
-                'icon': new_icon_db_path,
-                'rule_graph': ach_data['rule_graph'],
-                'is_active': True
-            }
-        )
-        
-        achievement_map[ach_data['id']] = achievement
-        
-        if created:
-            print(f"  Создано достижение: {achievement.title}")
-        else:
-            print(f"  Обновлено достижение: {achievement.title}")
-
-    print("\nМигрирую полученные достижения пользователей...")
-    sqlite_cursor.execute("SELECT * FROM kei_school_userachievement")
-    old_user_achievements = sqlite_cursor.fetchall()
-    
-    count_awarded = 0
-    for ua_data in old_user_achievements:
-        old_ach_id = ua_data['achievement_id']
-        user_id = ua_data['user_id']
-        achieved_at = ua_data['achieved_at'] # String format likely
-        
-        if old_ach_id not in achievement_map:
-            print(f"  Пропущено: достижение с ID {old_ach_id} не в списке миграции.")
-            continue
-            
-        try:
-            user = User.objects.get(id=user_id)
-            achievement = achievement_map[old_ach_id]
-            
-            # Parse date if needed, but Django usually handles string dates well if format is standard ISO
-            # If achieved_at is string "YYYY-MM-DD HH:MM:SS.ssssss", Django might need help if it's not timezone aware
-            # Let's try direct assignment first
-            
-            ua, created = UserAchievement.objects.get_or_create(
-                user=user,
-                achievement=achievement,
-            )
-            
-            if created:
-                # Manually set awarded_at since auto_now_add=True prevents it in create() usually? 
-                # Actually auto_now_add sets it on creation, we need to update it to match legacy
-                ua.awarded_at = achieved_at
-                ua.save()
-                count_awarded += 1
-                print(f"  Выдано '{achievement.title}' пользователю {user.username}")
-            else:
-                 # Update date just in case
-                 ua.awarded_at = achieved_at
-                 ua.save()
-        
-        except User.DoesNotExist:
-            print(f"  Пользователь с ID {user_id} не найден.")
-        except Exception as e:
-            print(f"  Ошибка при выдаче достижения: {e}")
-            
-    print(f"Миграция достижений завершена. Выдано: {count_awarded}")
-
-
-def migrate_user_levels_and_coins(sqlite_conn):
-    print("\nНачинаю миграцию уровней и монеток...")
-    
-    stats_list = LearningStats.objects.all()
-    count = 0
-    for stats in stats_list:
-        # 1. Монеты = Опыт (так как раньше монет не было)
-        stats.coins = stats.experience_points
-        
-        # 2. Пересчет уровня
-        new_level = stats.calculate_level()
-        stats.level = new_level
-        
-        stats.save()
-        count += 1
-        print(f"Обновлен пользователь {stats.user.username}: XP={stats.experience_points}, Coins={stats.coins}, Level={stats.level}")
-
-    print(f"Миграция уровней и монеток завершена. Обновлено: {count}")
-
-
-def migrate_bonus_service(sqlite_conn):
-    print("\nНачинаю миграцию bonus_service...")
-    sqlite_cursor = sqlite_conn.cursor()
-    
-    from bonus_service.models import Bonus
-    from material_service.models import VideoMaterial
-    from auth_service.models import User
-    import shutil
-    
-    OLD_MEDIA_ROOT = 'to_migrate/media'
-    NEW_MEDIA_ROOT = settings.MEDIA_ROOT
-    
-    print("Мигрирую бонусы...")
-    sqlite_cursor.execute("SELECT * FROM kei_school_bonus")
-    old_bonuses = sqlite_cursor.fetchall()
-    
-    for bonus_data in old_bonuses:
-        try:
-            old_video_path = bonus_data['video']
-            new_video_material = None
-            
-            if old_video_path:
-                # Full path to old file
-                old_file_full_path = os.path.join(OLD_MEDIA_ROOT, old_video_path)
-                
-                if os.path.exists(old_file_full_path):
-                    # Extract just filename
-                    filename = os.path.basename(old_video_path)
-                    
-                    # Construct new path: material_video/filename (strip bonuses_videos/ prefix)
-                    new_relative_path = f"material_video/{filename}"
-                    new_file_full_path = os.path.join(NEW_MEDIA_ROOT, new_relative_path)
-                    
-                    # Ensure directory exists
-                    os.makedirs(os.path.dirname(new_file_full_path), exist_ok=True)
-                    
-                    # Copy file
-                    shutil.copy2(old_file_full_path, new_file_full_path)
-                    print(f"  Скопирован видео файл: {old_video_path} -> {new_relative_path}")
-                    
-                    # Create VideoMaterial with correct path
-                    new_video_material = VideoMaterial.objects.create(
-                        title=f"Бонус: {bonus_data['title']}",
-                        source_type='file',
-                        video_file=new_relative_path,
-                        created_by=User.objects.filter(is_staff=True).first()
-                    )
-                else:
-                    print(f"  Видео файл для бонуса '{bonus_data['title']}' не найден по пути: {old_file_full_path}")
-            
-            Bonus.objects.create(
-                title=bonus_data['title'],
-                description=bonus_data['description'],
-                price=100, # Default as requested
-                bonus_type='video',
-                video_material=new_video_material
-            )
-            print(f"Создан бонус '{bonus_data['title']}'.")
-            
-        except Exception as e:
-            print(f"Ошибка миграции бонуса {bonus_data.get('title')}: {e}")
-
-    print("Миграция bonus_service завершена.")
-
-
-
 if __name__ == '__main__':
     sqlite_conn = get_sqlite_connection()
     postgres_conn = get_postgres_connection()
@@ -2091,11 +1673,8 @@ if __name__ == '__main__':
         migrate_test_submissions(sqlite_conn)
         migrate_section_item_views(sqlite_conn)
         migrate_progress_service(sqlite_conn)
-        migrate_achievements(sqlite_conn)
-        migrate_bonus_service(sqlite_conn)
-        migrate_user_levels_and_coins(sqlite_conn)
 
     if sqlite_conn:
         sqlite_conn.close()
     if postgres_conn:
-        postgres_conn.close()
+        postgres_conn.close() 

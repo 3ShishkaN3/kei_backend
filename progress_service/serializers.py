@@ -50,13 +50,11 @@ class LessonProgressSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     lesson_title = serializers.CharField(source='lesson.title', read_only=True)
     course_title = serializers.CharField(source='lesson.course.title', read_only=True)
-    lesson_id = serializers.IntegerField(source='lesson.id', read_only=True)
-    course_id = serializers.IntegerField(source='lesson.course.id', read_only=True)
     
     class Meta:
         model = LessonProgress
         fields = [
-            'id', 'username', 'lesson_id', 'course_id', 'lesson_title', 'course_title', 'total_sections',
+            'id', 'username', 'lesson_title', 'course_title', 'total_sections',
             'completed_sections', 'total_tests', 'passed_tests', 'failed_tests',
             'completion_percentage', 'started_at', 'completed_at', 'last_activity',
             'created_at', 'updated_at'
@@ -107,7 +105,7 @@ class LearningStatsSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'total_study_days', 'current_streak_days',
             'longest_streak_days', 'average_daily_time_minutes', 'total_achievements',
-            'level', 'experience_points', 'coins', 'created_at', 'updated_at'
+            'level', 'experience_points', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
 

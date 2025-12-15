@@ -51,6 +51,8 @@ class LessonViewSet(viewsets.ModelViewSet):
         queryset = Lesson.objects.filter(course=course)\
                                  .select_related('created_by')\
                                  .prefetch_related('sections') 
+
+
         return queryset
 
     def retrieve(self, request, *args, **kwargs):
@@ -129,19 +131,6 @@ class LessonViewSet(viewsets.ModelViewSet):
                 {"message": "Урок уже был завершен ранее.", "details": serializer.data},
                 status=status.HTTP_200_OK
             )
-
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
-    def all_simple(self, request):
-        """
-        Возвращает упрощенный список всех уроков (id, title, course_title)
-        для использования в селекторах админки/редактора достижений.
-        Игнорирует фильтрацию по курсу.
-        """
-        if not (request.user.is_staff or getattr(request.user, 'role', '') == 'admin'):
-             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-
-        lessons = Lesson.objects.all().select_related('course').values('id', 'title', 'course__title')
-        return Response(list(lessons))
 
 
 class SectionViewSet(viewsets.ModelViewSet):
@@ -323,6 +312,7 @@ class SectionViewSet(viewsets.ModelViewSet):
 
                 max_current_order_obj = Section.objects.filter(lesson=lesson).aggregate(max_val=Max('order'))
                 max_current_order = max_current_order_obj['max_val'] if max_current_order_obj['max_val'] is not None else -1 
+
                 max_payload_order = 0
                 if new_orders_set: 
                     max_payload_order = max(new_orders_set)
@@ -500,7 +490,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         current_instance = serializer.instance # SectionItem
         section = current_instance.section 
-        
+
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет прав на изменение этого элемента.")
 

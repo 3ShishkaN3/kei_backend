@@ -6,7 +6,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from auth_service.models import User
-from auth_service.serializers import UserSerializer
 from .permissions import IsAdminTeacherAssistantOrReadOnly, IsAdminTeacherOrReadOnly
 from .models import Course, CourseTeacher, CourseAssistant, CourseEnrollment
 from kei_backend.utils import send_to_kafka
@@ -15,9 +14,7 @@ from .serializers import (
     CourseDetailSerializer,
     CourseTeacherSerializer,
     CourseAssistantSerializer,
-    CourseEnrollmentSerializer,
-    BulkEnrollmentSerializer,
-    BulkLeaveSerializer
+    CourseEnrollmentSerializer
 )
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -126,10 +123,6 @@ class CourseViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'list':
             return CourseListSerializer
-        if self.action == 'bulk_enroll':
-            return BulkEnrollmentSerializer
-        if self.action == 'bulk_leave':
-            return BulkLeaveSerializer
         return CourseDetailSerializer
     
     def get_permissions(self):
@@ -276,182 +269,6 @@ class CourseViewSet(viewsets.ModelViewSet):
                 {"error": "Пользователь не записан на курс или курс уже завершён/отчислен"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-    
-    @action(detail=True, methods=['post'], serializer_class=BulkEnrollmentSerializer)
-    def bulk_enroll(self, request, pk=None):
-        """
-        Массовая запись учеников на курс.
-        
-        Принимает список student_ids и записывает всех учеников на курс.
-        """
-        if request.user.role not in ['admin', 'teacher']:
-            return Response(
-                {"error": "Нет прав для записи учеников на курс"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        course = self.get_object()
-        student_ids = serializer.validated_data['student_ids']
-        students = User.objects.filter(id__in=student_ids, role=User.Role.STUDENT)
-        
-        if students.count() != len(student_ids):
-            return Response(
-                {"error": "Некоторые ID не принадлежат ученикам или не найдены"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        created_count = 0
-        updated_count = 0
-        errors = []
-        
-        for student in students:
-            # Проверяем, не является ли студент преподавателем или помощником этого курса
-            if CourseTeacher.objects.filter(course=course, teacher=student).exists() or \
-               CourseAssistant.objects.filter(course=course, assistant=student).exists():
-                errors.append(f"{student.username} является преподавателем или помощником курса")
-                continue
-            
-            enrollment, created = CourseEnrollment.objects.get_or_create(
-                course=course,
-                student=student,
-                defaults={'status': 'active'}
-            )
-            
-            if created:
-                created_count += 1
-                send_to_kafka('course_events', {
-                    'type': 'enrollment',
-                    'user_id': student.id,
-                    'course_id': course.id,
-                    'timestamp': timezone.now().isoformat()
-                })
-            elif enrollment.status != 'active':
-                enrollment.status = 'active'
-                enrollment.save()
-                updated_count += 1
-                send_to_kafka('course_events', {
-                    'type': 'enrollment',
-                    'user_id': student.id,
-                    'course_id': course.id,
-                    'timestamp': timezone.now().isoformat()
-                })
-        
-        response_data = {
-            "message": f"Записано новых: {created_count}, обновлено: {updated_count}",
-            "created_count": created_count,
-            "updated_count": updated_count
-        }
-        
-        if errors:
-            response_data["errors"] = errors
-        
-        return Response(response_data, status=status.HTTP_200_OK)
-    
-    @action(detail=True, methods=['post'], serializer_class=BulkLeaveSerializer)
-    def bulk_leave(self, request, pk=None):
-        """
-        Массовое отчисление учеников с курса.
-        
-        Принимает список student_ids и отчисляет всех учеников с курса.
-        """
-        if request.user.role not in ['admin', 'teacher']:
-            return Response(
-                {"error": "Нет прав для отчисления учеников с курса"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        course = self.get_object()
-        student_ids = serializer.validated_data['student_ids']
-        
-        enrollments = CourseEnrollment.objects.filter(
-            course=course,
-            student_id__in=student_ids,
-            status='active'
-        )
-        
-        updated_count = enrollments.count()
-        
-        for enrollment in enrollments:
-            enrollment.status = 'dropped'
-            enrollment.save()
-            
-            send_to_kafka('course_events', {
-                'type': 'leave_course',
-                'user_id': enrollment.student.id,
-                'course_id': course.id,
-                'timestamp': timezone.now().isoformat()
-            })
-        
-        return Response({
-            "message": f"Отчислено учеников: {updated_count}",
-            "updated_count": updated_count
-        }, status=status.HTTP_200_OK)
-    
-    @action(detail=False, methods=['get'])
-    def student_statistics(self, request):
-        """
-        Получение статистики по ученику.
-        
-        Параметры:
-        - student_id: ID ученика (обязательно)
-        
-        Возвращает статистику по записям ученика на курсы.
-        """
-        if request.user.role not in ['admin', 'teacher']:
-            return Response(
-                {"error": "Нет прав для просмотра статистики учеников"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        student_id = request.query_params.get('student_id')
-        if not student_id:
-            return Response(
-                {"error": "student_id обязателен"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            student = User.objects.get(id=student_id, role=User.Role.STUDENT)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "Ученик не найден"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Проверяем права преподавателя
-        if request.user.role == 'teacher':
-            teacher_courses = CourseTeacher.objects.filter(teacher=request.user).values_list('course_id', flat=True)
-            enrollments = CourseEnrollment.objects.filter(
-                student=student,
-                course_id__in=teacher_courses
-            )
-        else:
-            enrollments = CourseEnrollment.objects.filter(student=student)
-        
-        total_courses = enrollments.count()
-        active_courses = enrollments.filter(status='active').count()
-        completed_courses = enrollments.filter(status='completed').count()
-        dropped_courses = enrollments.filter(status='dropped').count()
-        
-        # Получаем детали записей
-        enrollment_data = CourseEnrollmentSerializer(enrollments, many=True).data
-        
-        return Response({
-            "student": UserSerializer(student).data,
-            "statistics": {
-                "total_courses": total_courses,
-                "active_courses": active_courses,
-                "completed_courses": completed_courses,
-                "dropped_courses": dropped_courses
-            },
-            "enrollments": enrollment_data
-        }, status=status.HTTP_200_OK)
 
 class CourseTeacherViewSet(viewsets.ModelViewSet):
     serializer_class = CourseTeacherSerializer

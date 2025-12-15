@@ -5,18 +5,13 @@ URL конфигурация для сервиса аутентификации.
 включая регистрацию, вход, управление пользователями и подтверждения.
 """
 
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from django.urls import path
 from .views import (
     CSRFTokenView, RegisterView, LoginView, LogoutView, UserRoleView,
     RegistrationConfirmView, RequestPasswordResetView, ConfirmPasswordResetView,
     RequestEmailChangeView, ConfirmEmailChangeView, UserView, RegisterResendView,
-    RequestPasswordChangeView, ConfirmPasswordChangeView, StudentsListView,
-    UserViewSet,
+    RequestPasswordChangeView, ConfirmPasswordChangeView,
 )
-
-router = DefaultRouter()
-router.register(r'users', UserViewSet, basename='admin-user')
 
 urlpatterns = [
     # CSRF токен для защиты от CSRF атак
@@ -28,10 +23,6 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(), name="logout"),
     path("user/<int:user_id>/role/", UserRoleView.as_view(), name="user-role"),
     path("user/", UserView.as_view(), name="user"),
-    path("students/", StudentsListView.as_view(), name="students-list"),
-    
-    # Административное управление пользователями (CRUD)
-    path("", include(router.urls)),
     
     # Подтверждение регистрации
     path("register/confirm/", RegistrationConfirmView.as_view(), name="register-confirm"),

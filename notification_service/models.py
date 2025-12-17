@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 class Notification(models.Model):
     data = models.JSONField(null=True, blank=True, verbose_name='Data')
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notifications', verbose_name='Получатель')
-# Create your models here.
+
     class NotificationType(models.TextChoices):
         # Для ученика
         NEW_LESSON_AVAILABLE = 'NEW_LESSON_AVAILABLE', 'Новый урок доступен'

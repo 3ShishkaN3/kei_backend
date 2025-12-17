@@ -64,6 +64,9 @@ INSTALLED_APPS = [
     'material_service',
     'dict_service',
     'progress_service',
+    'calendar_service',
+    'bonus_service',
+    'achievement_service',
     'notification_service',
     'channels',
 ]
@@ -152,7 +155,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'auth_service.User'
 
-CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -181,6 +184,7 @@ CSRF_TRUSTED_ORIGINS = [
 AUTHENTICATION_BACKENDS = [
     'auth_service.backends.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',
+    'axes.backends.AxesStandaloneBackend',
 ]
 
 

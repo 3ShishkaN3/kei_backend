@@ -8,17 +8,7 @@ SECRET_KEY = config('SECRET_KEY')
 
 DEBUG = config('DEBUG', cast=bool)
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
-
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN')
-TEACHER_CHAT_ID = config('TEACHER_CHAT_ID')
-
-SWAGGER_SETTINGS = {
-    'DEFAULT_AUTO_SCHEMA_CLASS': 'drf_yasg.inspectors.SwaggerAutoSchema',
-}
 
 
 CELERY_BROKER_URL = config('CELERY_BROKER_URL')
@@ -67,6 +57,7 @@ INSTALLED_APPS = [
     'calendar_service',
     'achievement_service',
     'bonus_service',
+    'storages',
 ]
 
 MIDDLEWARE = [
@@ -80,6 +71,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'axes.middleware.AxesMiddleware',
 ]
+
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN')
+TEACHER_CHAT_ID = config('TEACHER_CHAT_ID')
+
+SWAGGER_SETTINGS = {
+    'DEFAULT_AUTO_SCHEMA_CLASS': 'drf_yasg.inspectors.SwaggerAutoSchema',
+}
 
 ROOT_URLCONF = 'kei_backend.urls'
 
@@ -240,7 +241,6 @@ LOGGING = {
 }
 
 
-# Sentry integration (reads SENTRY_DSN from environment / .env)
 try:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
@@ -250,10 +250,43 @@ try:
             dsn=SENTRY_DSN,
             integrations=[DjangoIntegration()],
             send_default_pii=True,
-            # set traces_sample_rate to a low value or 0.0 unless you want performance tracing
             traces_sample_rate=0.0,
         )
 except Exception:
-    # don't break the app if sentry isn't installed or configuration fails
     pass
 
+USE_S3 = os.environ.get('USE_S3', 'False') == 'True'
+
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL')
+    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'ru-central-1')
+    
+    STORAGES = {
+        "default": {
+            "BACKEND": "kei_backend.storage_backends.MediaStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = 'private'
+    AWS_QUERYSTRING_AUTH = True
+    
+
+    
+    STATIC_URL = '/static/'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'
+else:
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
+    STATIC_URL = '/static/'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'

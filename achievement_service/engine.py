@@ -14,9 +14,6 @@ class RuleEngine:
             return False
             
         if not achievement.compiled_rules:
-            # If no rules, but it has triggers... 
-            # If it was triggered, and there are no additional conditions, it should be awarded.
-            # (e.g. "On Lesson Complete" -> Award)
             return True
 
         try:
@@ -42,22 +39,7 @@ class RuleEngine:
         :param context: Dictionary of facts
         :return: List of newly awarded UserAchievement instances
         """
-        # 1. Filter achievements that are triggered by this event.
-        # We look for achievements where 'triggers' list contains an entry with matching 'type'.
-        # And if params are specified, they must match.
-        
-        # This filtering is a bit complex for pure SQL if triggers is a list of dicts.
-        # But we can filter by "triggers__contains" if we construct the partial object?
-        # No, because params might be partial.
-        
-        # Better approach: Filter by type first, then refine in Python.
-        # We assume 'triggers' is a list of dicts: [{'type': '...', 'params': {...}}]
-        
-        # Django's JSONField lookups:
-        # Achievement.objects.filter(triggers__contains=[{'type': event_type}])
-        # This works if the dict matches exactly or is a subset? Postgres JSONB supports containment.
-        # SQLite supports it too in recent versions.
-        
+    
         candidates = Achievement.objects.filter(
             is_active=True,
             triggers__contains=[{'type': event_type}] 
@@ -70,11 +52,6 @@ class RuleEngine:
         newly_awarded = []
         
         for achievement in candidates:
-            # 2. Check specific trigger parameters
-            # e.g. if achievement requires lesson_id=5, and context has lesson_id=5 -> Match.
-            # if achievement requires lesson_id=5, and context has lesson_id=6 -> No Match.
-            # if achievement has NO params (Any lesson), and context has lesson_id=6 -> Match.
-            
             is_trigger_match = False
             for trigger in achievement.triggers:
                 if trigger['type'] != event_type:
@@ -85,13 +62,10 @@ class RuleEngine:
                     is_trigger_match = True
                     break
                 
-                # Check all params
                 match = True
                 for key, value in params.items():
                     if value is None: # "Any"
                         continue
-                    # Value in context might be int, value in params might be string/int
-                    # Try to get from top-level context, then from event data
                     ctx_val = context.get(key)
                     if ctx_val is None and 'event' in context:
                         ctx_val = context['event'].get(key)
@@ -106,7 +80,6 @@ class RuleEngine:
             if not is_trigger_match:
                 continue
 
-            # 3. Evaluate Conditions
             if RuleEngine.evaluate(achievement, context):
                 ua = UserAchievement.objects.create(user=user, achievement=achievement)
                 newly_awarded.append(ua)

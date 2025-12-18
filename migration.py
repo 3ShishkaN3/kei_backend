@@ -6,6 +6,7 @@ import django
 import shutil
 import datetime
 from django.utils import timezone
+from django.conf import settings
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kei_backend'))
 

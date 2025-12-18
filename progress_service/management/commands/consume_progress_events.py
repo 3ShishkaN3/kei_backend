@@ -10,7 +10,7 @@ from progress_service.models import (
     SectionItemView,
 )
 from course_service.models import Course, CourseEnrollment
-from lesson_service.models import Lesson, Section, SectionItem
+from lesson_service.models import Lesson, Section, SectionItem, SectionCompletion, LessonCompletion
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 from decouple import config
@@ -113,16 +113,112 @@ class Command(BaseCommand):
                 continue
 
     def handle_lesson_completed(self, data, user):
-        """Placeholder implementation"""
-        self.stdout.write("handle_lesson_completed called (no-op)")
+        lesson_id = data.get("lesson_id")
+        course_id = data.get("course_id")
+
+        if not lesson_id:
+            self.stdout.write("lesson_completed event без lesson_id. Пропускаю.")
+            return
+
+        try:
+            lesson = Lesson.objects.get(pk=lesson_id)
+        except Lesson.DoesNotExist:
+            self.stdout.write(f"Урок {lesson_id} не найден. Пропускаю событие lesson_completed.")
+            return
+
+        completion, created = LessonCompletion.objects.get_or_create(
+            lesson=lesson,
+            student=user,
+            defaults={"completed_at": timezone.now()},
+        )
+
+        if created:
+            self.stdout.write(f"Создано LessonCompletion для урока {lesson_id} и пользователя {user.username}")
+
+        self.update_lesson_progress(user, lesson_id, course_id or lesson.course_id)
+        completed_lessons = LessonProgress.objects.filter(
+            user=user, lesson__course_id=lesson.course_id, completion_percentage=100
+        ).count()
+        passed_tests = TestProgress.objects.filter(
+            user=user, course_id=lesson.course_id, status="passed"
+        ).values("test_id").distinct().count()
+        self.update_course_progress(user, lesson.course_id, completed_lessons, passed_tests)
+        self.update_user_progress(user)
 
     def handle_section_completed(self, data, user):
-        """Placeholder implementation"""
-        self.stdout.write("handle_section_completed called (no-op)")
+        section_id = data.get("section_id")
+        lesson_id = data.get("lesson_id")
+        course_id = data.get("course_id")
+
+        if not section_id:
+            self.stdout.write("section_completed event без section_id. Пропускаю.")
+            return
+
+        try:
+            section = Section.objects.select_related("lesson__course").get(pk=section_id)
+        except Section.DoesNotExist:
+            self.stdout.write(f"Секция {section_id} не найдена. Пропускаю событие section_completed.")
+            return
+
+        completion, created = SectionCompletion.objects.get_or_create(
+            section=section,
+            student=user,
+            defaults={"completed_at": timezone.now()},
+        )
+
+        if created:
+            self.stdout.write(f"Создано SectionCompletion для секции {section_id} и пользователя {user.username}")
+
+        self.update_section_progress(user, section_id)
+        self.update_lesson_progress(user, lesson_id or section.lesson_id, course_id or section.lesson.course_id)
+        completed_lessons = LessonProgress.objects.filter(
+            user=user, lesson__course_id=section.lesson.course_id, completion_percentage=100
+        ).count()
+        passed_tests = TestProgress.objects.filter(
+            user=user, course_id=section.lesson.course_id, status="passed"
+        ).values("test_id").distinct().count()
+        self.update_course_progress(user, section.lesson.course_id, completed_lessons, passed_tests)
+        self.update_user_progress(user)
 
     def handle_material_viewed(self, data, user):
-        """Placeholder implementation"""
-        self.stdout.write("handle_material_viewed called (no-op)")
+        section_item_id = data.get("section_item_id")
+        section_id = data.get("section_id")
+        lesson_id = data.get("lesson_id")
+        course_id = data.get("course_id")
+        item_type = data.get("item_type")
+
+        if not section_item_id or not section_id:
+            self.stdout.write("material_viewed event без section_item_id или section_id. Пропускаю.")
+            return
+
+        if item_type == "test":
+            self.stdout.write("material_viewed для теста игнорируется.")
+            return
+
+        _, created = SectionItemView.objects.get_or_create(
+            user=user,
+            section_item_id=section_item_id,
+            defaults={
+                "section_id": section_id,
+            },
+        )
+
+        if created:
+            self.stdout.write(
+                f"Создан SectionItemView (item={section_item_id}) для пользователя {user.username}"
+            )
+
+        self.update_section_progress(user, section_id)
+        if lesson_id and course_id:
+            self.update_lesson_progress(user, lesson_id, course_id)
+            completed_lessons = LessonProgress.objects.filter(
+                user=user, lesson__course_id=course_id, completion_percentage=100
+            ).count()
+            passed_tests = TestProgress.objects.filter(
+                user=user, course_id=course_id, status="passed"
+            ).values("test_id").distinct().count()
+            self.update_course_progress(user, course_id, completed_lessons, passed_tests)
+        self.update_user_progress(user)
 
     def handle_test_submitted(self, data, user):
         """Обработка отправки теста"""
@@ -135,6 +231,7 @@ class Command(BaseCommand):
         submission_id = data.get("submission_id")
         status = data.get("status")
 
+        status_from_event = status
         test_progress, created = TestProgress.objects.get_or_create(
             user=user,
             test_id=test_id,
@@ -151,13 +248,25 @@ class Command(BaseCommand):
             },
         )
 
-        if not created:
-            test_progress.attempts_count += 1
-            test_progress.last_attempt_at = timezone.now()
-            if status in ["passed", "auto_passed"]:
+        status_changed = False
+
+        if created:
+            if status_from_event in ["passed", "auto_passed"]:
                 test_progress.status = "passed"
                 test_progress.completed_at = timezone.now()
-            elif status in ["failed", "auto_failed"]:
+                status_changed = True
+            elif status_from_event in ["failed", "auto_failed"]:
+                test_progress.status = "failed"
+                status_changed = True
+            if status_changed:
+                test_progress.save()
+        else:
+            test_progress.attempts_count += 1
+            test_progress.last_attempt_at = timezone.now()
+            if status_from_event in ["passed", "auto_passed"]:
+                test_progress.status = "passed"
+                test_progress.completed_at = timezone.now()
+            elif status_from_event in ["failed", "auto_failed"]:
                 test_progress.status = "failed"
             test_progress.save()
 

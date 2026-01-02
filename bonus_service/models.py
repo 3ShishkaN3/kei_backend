@@ -15,11 +15,8 @@ class Bonus(models.Model):
     price = models.PositiveIntegerField(default=100)
     bonus_type = models.CharField(max_length=20, choices=BONUS_TYPE_CHOICES, default='video')
     
-    # For video bonuses
     video_material = models.ForeignKey(VideoMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='bonuses')
-    
-    # For other types, we might add more fields later
-    
+        
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

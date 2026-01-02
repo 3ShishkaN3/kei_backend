@@ -62,7 +62,6 @@ class AuthServiceTests(TestCase):
         self.assertIn("message", response.data)
         self.assertIn("user", response.data)
 
-        # Проверяем создание пользователя и кода подтверждения
         user = User.objects.get(email="shishka-danil@mail.ru")
         confirmation_exists = ConfirmationCode.objects.filter(user=user, code_type=ConfirmationCode.REGISTRATION).exists()
         self.assertTrue(confirmation_exists)
@@ -73,7 +72,6 @@ class AuthServiceTests(TestCase):
         
         Проверяет успешный вход в систему и корректный выход.
         """
-        # Создаем тестового пользователя
         user = User.objects.create_user(
             username="testlogin", 
             email="shishka-danil@mail.ru", 
@@ -85,13 +83,11 @@ class AuthServiceTests(TestCase):
             "password": "Passw0rd123"
         }
         
-        # Тестируем вход
         login_response = self.client.post(self.login_url, login_data, format="json")
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
         self.assertIn("message", login_response.data)
         self.assertEqual(login_response.data["message"], "Вы успешно вошли")
 
-        # Тестируем выход
         logout_response = self.client.post(self.logout_url, format="json")
         self.assertEqual(logout_response.status_code, status.HTTP_200_OK)
         self.assertIn("message", logout_response.data)

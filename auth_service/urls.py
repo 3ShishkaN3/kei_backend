@@ -19,10 +19,8 @@ router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='admin-user')
 
 urlpatterns = [
-    # CSRF токен для защиты от CSRF атак
     path("csrf-token/", CSRFTokenView.as_view(), name="csrf-token"),
     
-    # Основные операции аутентификации
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
@@ -30,20 +28,16 @@ urlpatterns = [
     path("user/", UserView.as_view(), name="user"),
     path("students/", StudentsListView.as_view(), name="students-list"),
     
-    # Административное управление пользователями (CRUD)
     path("", include(router.urls)),
     
-    # Подтверждение регистрации
     path("register/confirm/", RegistrationConfirmView.as_view(), name="register-confirm"),
     path("register/resend/", RegisterResendView.as_view(), name="register-resend"),
     
-    # Управление паролями
     path("password/reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
     path("password/reset/confirm/", ConfirmPasswordResetView.as_view(), name="password-reset-confirm"),
     path("password/change/request/", RequestPasswordChangeView.as_view(), name="password-change-request"),
     path("password/change/confirm/", ConfirmPasswordChangeView.as_view(), name="password-change-confirm"),
 
-    # Управление email
     path("email/change/request/", RequestEmailChangeView.as_view(), name="email-change-request"),
     path("email/change/confirm/", ConfirmEmailChangeView.as_view(), name="email-change-confirm"),
 ]

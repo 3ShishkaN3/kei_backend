@@ -1,4 +1,3 @@
-# === БАЗОВЫЙ ОБРАЗ ===
 FROM python:3.11.11-slim as base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

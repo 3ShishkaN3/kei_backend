@@ -991,12 +991,10 @@ def migrate_test_submissions(sqlite_conn):
     from lesson_service.models import Section, SectionItem
     from django.contrib.contenttypes.models import ContentType
 
-    # 1. Создаем карту соответствия: old_testtype_id -> new_test_id
     print("  Создаю карту соответствия старых и новых тестов...")
     old_to_new_test_map = {}
     all_new_tests = Test.objects.all()
     for new_test in all_new_tests:
-        # Извлекаем старый ID из заголовка, если он там есть
         try:
             if new_test.title and 'Тест ' in new_test.title:
                 old_id = int(new_test.title.split('Тест ')[-1])
@@ -1005,7 +1003,6 @@ def migrate_test_submissions(sqlite_conn):
             continue
     print(f"  Карта создана, найдено {len(old_to_new_test_map)} сопоставлений.")
 
-    # 2. Мигрируем реальные текстовые ответы
     sqlite_cursor.execute("""
         SELECT ua.id, ua.user_id, ua.text, ua.test_id as testtype_id
         FROM kei_school_useranswers ua
@@ -1023,7 +1020,6 @@ def migrate_test_submissions(sqlite_conn):
             if not new_test:
                 continue
             
-            # Проверяем, чтобы не дублировать
             if TestSubmission.objects.filter(test=new_test, student=user).exists():
                 continue
 
@@ -1040,7 +1036,6 @@ def migrate_test_submissions(sqlite_conn):
             print(f"  Ошибка при миграции текстового ответа {answer['id']}: {e}")
     print(f"  Мигрировано {text_submission_count} текстовых ответов.")
 
-    # 3. Мигрируем пройденные тесты, создавая правильные ответы
     sqlite_cursor.execute("""
         SELECT ua.user_id, ua.test_id as testtype_id
         FROM kei_school_useranswers ua
@@ -1138,7 +1133,6 @@ def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
     print(f"  Мигрирую LearningStats для {user.username}")
     print("    - Очки опыта будут пересчитаны на основе прогресса после миграции тестов")
 
-    # Расчет статистики по дням обучения (streaks)
     sqlite_cursor.execute("""
         SELECT complete_date as activity_date FROM kei_school_usertest WHERE user_id = ? AND is_complete = 1
         UNION
@@ -1148,7 +1142,6 @@ def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
     activity_dates = set()
     for row in sqlite_cursor.fetchall():
         if row['activity_date']:
-            # Преобразуем строку 'YYYY-MM-DD HH:MM:SS.ffffff' в 'YYYY-MM-DD'
             date_str = str(row['activity_date']).split(' ')[0]
             activity_dates.add(date_str)
 
@@ -1172,11 +1165,10 @@ def migrate_user_learning_stats(sqlite_cursor, user, learning_stats):
                     current_streak = 1
             longest_streak = max(longest_streak, current_streak)
 
-        # Проверка текущего стрика до сегодняшнего дня
         today = timezone.now().date()
         last_activity_date = datetime.datetime.strptime(sorted_dates[-1], '%Y-%m-%d').date()
         if (today - last_activity_date).days > 1:
-            current_streak = 0 # Стрик прерван
+            current_streak = 0
 
         learning_stats.total_study_days = total_study_days
         learning_stats.longest_streak_days = longest_streak
@@ -1226,39 +1218,31 @@ def migrate_progress_service(sqlite_conn):
     from lesson_service.models import Section
     from material_service.models import Test
     
-    # Получаем всех пользователей-студентов
     students = User.objects.filter(role=User.Role.STUDENT)
     
     for student in students:
         print(f"\nОбрабатываю прогресс для пользователя {student.username} (ID: {student.id})")
         
-        # Создаем или получаем общий прогресс пользователя
         user_progress, created = UserProgress.objects.get_or_create(
             user=student,
             defaults={'last_activity': timezone.now()}
         )
         
-        # Создаем или получаем статистику обучения
         learning_stats, created = LearningStats.objects.get_or_create(
             user=student,
             defaults={'level': 1, 'experience_points': 0}
         )
         migrate_user_learning_stats(sqlite_cursor, student, learning_stats)
         
-        # Мигрируем прогресс по тестам
         migrate_user_test_progress(sqlite_cursor, student, user_progress)
         recalculate_user_experience_from_progress(student, learning_stats)
         
-        # Мигрируем прогресс по секциям
         migrate_user_section_progress(sqlite_cursor, student, user_progress)
         
-        # Мигрируем прогресс по урокам
         migrate_user_lesson_progress(sqlite_cursor, student, user_progress)
         
-        # Мигрируем прогресс по курсам
         migrate_user_course_progress(sqlite_cursor, student, user_progress)
         
-        # Обновляем общую статистику пользователя
         update_user_overall_progress(student, user_progress)
         
         print(f"Прогресс для пользователя {student.username} обработан")
@@ -1273,8 +1257,6 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
     from lesson_service.models import Section, SectionItem
     from django.contrib.contenttypes.models import ContentType
     
-    # Получаем все пройденные тесты пользователя из старой БД
-    # Используем kei_school_useranswers, где test_id ссылается на kei_school_testtype (тесты)
     sqlite_cursor.execute("""
         SELECT 
             ua.test_id as testtype_id,
@@ -1296,7 +1278,6 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
         testtype_id, is_complete, test_type, test_question, section_test_id, section_name, lesson_id = test_data
         
         try:
-            # Находим соответствующую секцию в новой системе
             section = None
             try:
                 section = Section.objects.get(lesson_id=lesson_id, order=section_test_id)
@@ -1304,7 +1285,6 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
                 print(f"    Секция для lesson_id={lesson_id}, section_test_id={section_test_id} не найдена")
                 continue
             
-            # Ищем тест в этой секции по вопросу
             test = None
             if section:
                 test_content_type = ContentType.objects.get_for_model(Test)
@@ -1314,7 +1294,6 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
                     content_type=test_content_type
                 )
                 
-                # Ищем тест по вопросу
                 for section_item in section_items:
                     test_obj = section_item.content_object
                     if test_obj and test_obj.title and test_question:
@@ -1322,7 +1301,6 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
                             test = test_obj
                             break
                 
-                # Если не нашли по вопросу, берем первый тест в секции
                 if not test and section_items.exists():
                     test = section_items.first().content_object
             
@@ -1330,15 +1308,12 @@ def migrate_user_test_progress(sqlite_cursor, user, user_progress):
                 print(f"    Тест '{test_question}' (testtype_id={testtype_id}) не найден в новой системе")
                 continue
             
-            # Определяем статус теста
             status = 'passed' if is_complete else 'failed'
             
-            # Получаем информацию о связанных объектах
             section_id = section.id if section else 0
             lesson_id_new = section.lesson.id if section else 0
             course_id_new = section.lesson.course.id if section else 0
             
-            # Создаем или обновляем прогресс по тесту
             test_progress, created = TestProgress.objects.get_or_create(
                 user=user,
                 test_id=test.id,
@@ -1372,8 +1347,6 @@ def migrate_user_section_progress(sqlite_cursor, user, user_progress):
     from progress_service.models import SectionProgress, TestProgress
     from lesson_service.models import Section
     
-    # Получаем все секции, которые пользователь завершил в старой БД
-    # Используем kei_school_usertest для получения завершенных секций
     sqlite_cursor.execute("""
         SELECT DISTINCT
             t.lesson_id,
@@ -1392,43 +1365,35 @@ def migrate_user_section_progress(sqlite_cursor, user, user_progress):
         lesson_id, section_test_id, section_name, is_complete, complete_date = section_data
         
         try:
-            # Находим секцию в новой системе
             section = Section.objects.filter(lesson_id=lesson_id, order=section_test_id).first()
             
             if not section:
                 print(f"    Секция для lesson_id={lesson_id}, section_test_id={section_test_id} не найдена")
                 continue
             
-            # Подсчитываем общее количество item-ов в секции
             total_items = section.items.count()
             
-            # Подсчитываем количество тестов в секции
             total_tests = section.items.filter(item_type='test').count()
             
-            # Подсчитываем пройденные тесты в этой секции
             passed_tests = TestProgress.objects.filter(
                 user=user,
                 section_id=section.id,
                 status='passed'
             ).count()
             
-            # Подсчитываем проваленные тесты в этой секции
             failed_tests = TestProgress.objects.filter(
                 user=user,
                 section_id=section.id,
                 status='failed'
             ).count()
             
-            # Если секция была завершена в старой БД, считаем её полностью завершенной
             if is_complete:
                 completion_percentage = 100.0
-                completed_items = total_items  # Все item-ы считаются завершенными
+                completed_items = total_items 
             else:
-                # Рассчитываем процент завершения на основе тестов
                 completion_percentage = (passed_tests / total_tests * 100) if total_tests > 0 else 0
                 completed_items = passed_tests
             
-            # Создаем или обновляем прогресс по секции
             section_progress, created = SectionProgress.objects.get_or_create(
                 user=user,
                 section=section,
@@ -1461,7 +1426,6 @@ def migrate_user_lesson_progress(sqlite_cursor, user, user_progress):
     from progress_service.models import LessonProgress, SectionProgress, TestProgress
     from lesson_service.models import Lesson
     
-    # Получаем все уроки, где пользователь завершил хотя бы одну секцию
     sqlite_cursor.execute("""
         SELECT DISTINCT
             t.lesson_id,
@@ -1478,47 +1442,39 @@ def migrate_user_lesson_progress(sqlite_cursor, user, user_progress):
         lesson_id, lesson_name = lesson_data
         
         try:
-            # Находим урок в новой системе
             lesson = Lesson.objects.filter(id=lesson_id).first()
             
             if not lesson:
                 print(f"    Урок {lesson_name} (ID: {lesson_id}) не найден в новой системе")
                 continue
             
-            # Подсчитываем количество секций в уроке
             total_sections = lesson.sections.count()
             
-            # Подсчитываем завершенные секции
             completed_sections = SectionProgress.objects.filter(
                 user=user,
                 section__lesson=lesson,
                 completion_percentage=100
             ).count()
             
-            # Подсчитываем общее количество тестов в уроке
             total_tests = TestProgress.objects.filter(
                 user=user,
                 lesson_id=lesson.id
             ).count()
             
-            # Подсчитываем пройденные тесты
             passed_tests = TestProgress.objects.filter(
                 user=user,
                 lesson_id=lesson.id,
                 status='passed'
             ).count()
             
-            # Подсчитываем проваленные тесты
             failed_tests = TestProgress.objects.filter(
                 user=user,
                 lesson_id=lesson.id,
                 status='failed'
             ).count()
             
-            # Рассчитываем процент завершения
             completion_percentage = (completed_sections / total_sections * 100) if total_sections > 0 else 0
             
-            # Создаем или обновляем прогресс по уроку
             lesson_progress, created = LessonProgress.objects.get_or_create(
                 user=user,
                 lesson=lesson,
@@ -1549,7 +1505,6 @@ def migrate_user_course_progress(sqlite_cursor, user, user_progress):
     from progress_service.models import CourseProgress, SectionProgress, TestProgress
     from course_service.models import Course, CourseEnrollment
     
-    # Получаем все курсы, на которые записан пользователь
     sqlite_cursor.execute("""
         SELECT DISTINCT
             uc.course_id,
@@ -1565,64 +1520,53 @@ def migrate_user_course_progress(sqlite_cursor, user, user_progress):
         course_id, course_name = course_data
         
         try:
-            # Находим курс в новой системе
             course = Course.objects.filter(id=course_id).first()
             
             if not course:
                 print(f"    Курс {course_name} (ID: {course_id}) не найден в новой системе")
                 continue
             
-            # Создаем запись о записи на курс, если её нет
             enrollment, created = CourseEnrollment.objects.get_or_create(
                 student=user,
                 course=course,
                 defaults={'status': 'active'}
             )
             
-            # Подсчитываем количество уроков в курсе
             total_lessons = course.lessons.count()
             
-            # Подсчитываем завершенные уроки
             completed_lessons = LessonProgress.objects.filter(
                 user=user,
                 lesson__course=course,
                 completion_percentage=100
             ).count()
             
-            # Подсчитываем общее количество тестов в курсе
             total_tests = TestProgress.objects.filter(
                 user=user,
                 course_id=course.id
             ).count()
             
-            # Подсчитываем пройденные тесты
             passed_tests = TestProgress.objects.filter(
                 user=user,
                 course_id=course.id,
                 status='passed'
             ).count()
             
-            # Подсчитываем проваленные тесты
             failed_tests = TestProgress.objects.filter(
                 user=user,
                 course_id=course.id,
                 status='failed'
             ).count()
             
-            # Рассчитываем процент завершения
             completion_percentage = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
             
-            # Подсчитываем общее количество секций в курсе
             total_sections = sum(lesson.sections.count() for lesson in course.lessons.all())
             
-            # Подсчитываем завершенные секции
             completed_sections = SectionProgress.objects.filter(
                 user=user,
                 section__lesson__course=course,
                 completion_percentage=100
             ).count()
             
-            # Создаем или обновляем прогресс по курсу
             course_progress, created = CourseProgress.objects.get_or_create(
                 user=user,
                 course=course,
@@ -1654,7 +1598,6 @@ def update_user_overall_progress(user, user_progress):
     
     from progress_service.models import CourseProgress, LessonProgress, SectionProgress, TestProgress
     
-    # Подсчитываем общую статистику
     user_progress.total_courses_enrolled = CourseProgress.objects.filter(user=user).count()
     user_progress.total_courses_completed = CourseProgress.objects.filter(
         user=user, completion_percentage=100
@@ -1902,13 +1845,12 @@ def migrate_achievements(sqlite_conn):
     
     print("Создаю/обновляю достижения...")
     for ach_data in achievements_data:
-        # 1. Copy Icon
         old_icon_path = ach_data['icon_src']
         new_icon_db_path = None
         
         if old_icon_path:
             source_path = os.path.join(OLD_MEDIA_ROOT, old_icon_path)
-            # New path: achievements/icons/<filename>
+            # achievements/icons/<filename>
             filename = os.path.basename(old_icon_path)
             new_rel_path = os.path.join('achievements', 'icons', filename)
             dest_path = os.path.join(NEW_MEDIA_ROOT, new_rel_path)
@@ -1916,13 +1858,11 @@ def migrate_achievements(sqlite_conn):
             if os.path.exists(source_path):
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                 shutil.copy2(source_path, dest_path)
-                new_icon_db_path = new_rel_path.replace('\\', '/') # Ensure forward slashes for DB
+                new_icon_db_path = new_rel_path.replace('\\', '/') 
                 print(f"  Скопирована иконка для '{ach_data['title']}'")
             else:
                 print(f"  Иконка не найдена: {source_path}")
         
-        # 2. Create Achievement with rule_graph
-        # The save() method will automatically compile the graph into triggers and compiled_rules
         achievement, created = Achievement.objects.update_or_create(
             title=ach_data['title'],
             defaults={
@@ -1949,7 +1889,7 @@ def migrate_achievements(sqlite_conn):
     for ua_data in old_user_achievements:
         old_ach_id = ua_data['achievement_id']
         user_id = ua_data['user_id']
-        achieved_at = ua_data['achieved_at'] # String format likely
+        achieved_at = ua_data['achieved_at']
         
         if old_ach_id not in achievement_map:
             print(f"  Пропущено: достижение с ID {old_ach_id} не в списке миграции.")
@@ -1958,25 +1898,19 @@ def migrate_achievements(sqlite_conn):
         try:
             user = User.objects.get(id=user_id)
             achievement = achievement_map[old_ach_id]
-            
-            # Parse date if needed, but Django usually handles string dates well if format is standard ISO
-            # If achieved_at is string "YYYY-MM-DD HH:MM:SS.ssssss", Django might need help if it's not timezone aware
-            # Let's try direct assignment first
-            
+
             ua, created = UserAchievement.objects.get_or_create(
                 user=user,
                 achievement=achievement,
             )
             
             if created:
-                # Manually set awarded_at since auto_now_add=True prevents it in create() usually? 
-                # Actually auto_now_add sets it on creation, we need to update it to match legacy
+                
                 ua.awarded_at = achieved_at
                 ua.save()
                 count_awarded += 1
                 print(f"  Выдано '{achievement.title}' пользователю {user.username}")
             else:
-                 # Update date just in case
                  ua.awarded_at = achieved_at
                  ua.save()
         
@@ -1994,10 +1928,8 @@ def migrate_user_levels_and_coins(sqlite_conn):
     stats_list = LearningStats.objects.all()
     count = 0
     for stats in stats_list:
-        # 1. Монеты = Опыт (так как раньше монет не было)
         stats.coins = stats.experience_points
         
-        # 2. Пересчет уровня
         new_level = stats.calculate_level()
         stats.level = new_level
         
@@ -2030,25 +1962,20 @@ def migrate_bonus_service(sqlite_conn):
             new_video_material = None
             
             if old_video_path:
-                # Full path to old file
                 old_file_full_path = os.path.join(OLD_MEDIA_ROOT, old_video_path)
                 
                 if os.path.exists(old_file_full_path):
-                    # Extract just filename
                     filename = os.path.basename(old_video_path)
                     
-                    # Construct new path: material_video/filename (strip bonuses_videos/ prefix)
+                    # material_video/filename (strip bonuses_videos/ prefix)
                     new_relative_path = f"material_video/{filename}"
                     new_file_full_path = os.path.join(NEW_MEDIA_ROOT, new_relative_path)
                     
-                    # Ensure directory exists
                     os.makedirs(os.path.dirname(new_file_full_path), exist_ok=True)
                     
-                    # Copy file
                     shutil.copy2(old_file_full_path, new_file_full_path)
                     print(f"  Скопирован видео файл: {old_video_path} -> {new_relative_path}")
                     
-                    # Create VideoMaterial with correct path
                     new_video_material = VideoMaterial.objects.create(
                         title=f"Бонус: {bonus_data['title']}",
                         source_type='file',
@@ -2061,7 +1988,7 @@ def migrate_bonus_service(sqlite_conn):
             Bonus.objects.create(
                 title=bonus_data['title'],
                 description=bonus_data['description'],
-                price=100, # Default as requested
+                price=100,
                 bonus_type='video',
                 video_material=new_video_material
             )

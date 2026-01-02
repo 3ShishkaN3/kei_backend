@@ -40,21 +40,17 @@ class EmailOrUsernameModelBackend(ModelBackend):
             return None
             
         user = None
-        # Определяем тип аутентификации по наличию '@' в username
         if "@" in username:
-            # Аутентификация по email
             try:
                 user = User.objects.get(email=username.lower())
             except User.DoesNotExist:
                 return None
         else:
-            # Аутентификация по username
             try:
                 user = User.objects.get(username=username)
             except User.DoesNotExist:
                 return None
 
-        # Проверяем пароль и возвращаем пользователя
         if user and user.check_password(password):
             return user
         return None

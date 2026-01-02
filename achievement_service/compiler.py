@@ -27,9 +27,8 @@ class GraphCompiler:
             trigger_type = data.get('trigger')
             params = {}
             
-            # Extract parameters based on trigger type
             if trigger_type == 'ON_LESSON_COMPLETE':
-                params['lesson_id'] = data.get('lesson_id') # Can be None (Any)
+                params['lesson_id'] = data.get('lesson_id') 
             elif trigger_type == 'ON_COURSE_COMPLETE':
                 params['course_id'] = data.get('course_id')
             elif trigger_type == 'ON_SECTION_COMPLETE':
@@ -88,7 +87,7 @@ class GraphCompiler:
                     else:
                         val = int(val)
                 except:
-                    pass # Keep as string
+                    pass
 
                 current_logic = { op: [ { "var": var }, val ] }
 

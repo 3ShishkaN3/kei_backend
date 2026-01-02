@@ -9,7 +9,6 @@ class CanViewOwnProgress(permissions.BasePermission):
         return request.user.is_authenticated
     
     def has_object_permission(self, request, view, obj):
-        # Пользователь может просматривать только свой прогресс
         if hasattr(obj, 'user'):
             return obj.user == request.user
         elif hasattr(obj, 'student'):
@@ -26,11 +25,9 @@ class CanViewStudentProgress(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
         
-        # Администраторы могут просматривать любой прогресс
         if user.role == 'admin':
             return True
         
-        # Преподаватели и помощники могут просматривать прогресс только своих студентов
         if hasattr(obj, 'user'):
             student = obj.user
         elif hasattr(obj, 'student'):
@@ -38,7 +35,6 @@ class CanViewStudentProgress(permissions.BasePermission):
         else:
             return False
         
-        # Проверяем, является ли пользователь преподавателем или помощником курса студента
         if user.role == 'teacher':
             return CourseTeacher.objects.filter(
                 teacher=user,
@@ -62,15 +58,12 @@ class CanViewCourseProgress(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
         
-        # Администраторы могут просматривать любой прогресс
         if user.role == 'admin':
             return True
         
-        # Пользователь может просматривать свой прогресс
         if hasattr(obj, 'user') and obj.user == user:
             return True
         
-        # Преподаватели и помощники могут просматривать прогресс по своим курсам
         if user.role in ['teacher', 'assistant']:
             if hasattr(obj, 'course'):
                 course = obj.course

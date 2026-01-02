@@ -14,7 +14,6 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         bootstrap_servers = config('KAFKA_BOOTSTRAP_SERVERS', default='kafka:29092', cast=lambda v: [s.strip() for s in v.split(',')])
         
-        # Используем отдельную группу consumer_group, чтобы получать копию сообщений
         consumer = KafkaConsumer(
             'progress_events', 
             bootstrap_servers=bootstrap_servers,
@@ -32,11 +31,10 @@ class Command(BaseCommand):
             event_type = data.get('type')
             user_id = data.get('user_id')
             
-            # Маппинг типов событий на триггеры
             trigger_map = {
                 'lesson_completed': 'ON_LESSON_COMPLETE',
-                'course_completed': 'ON_COURSE_COMPLETE', # Если такое событие есть
-                'test_submitted': 'ON_TEST_PASSED', # Проверим статус внутри
+                'course_completed': 'ON_COURSE_COMPLETE',
+                'test_submitted': 'ON_TEST_PASSED',
                 'test_graded': 'ON_TEST_PASSED',
                 'section_completed': 'ON_SECTION_COMPLETE',
                 # 'level_up': 'ON_LEVEL_UP' # Если будет
@@ -46,7 +44,6 @@ class Command(BaseCommand):
             if not trigger:
                 continue
 
-            # Дополнительная фильтрация для тестов (только пройденные)
             if event_type in ['test_submitted', 'test_graded']:
                 status = data.get('status')
                 if status not in ['passed', 'auto_passed']:
@@ -63,7 +60,6 @@ class Command(BaseCommand):
                 for ua in new_achievements:
                     self.stdout.write(self.style.SUCCESS(f"ВЫДАНО ДОСТИЖЕНИЕ: {ua.achievement.title} пользователю {user.username}"))
                     
-                    # Начисляем награду за достижение
                     try:
                         stats, _ = LearningStats.objects.get_or_create(user=user)
                         stats.add_experience(ua.achievement.xp_reward)
@@ -73,7 +69,6 @@ class Command(BaseCommand):
                     except Exception as e:
                         self.stdout.write(self.style.ERROR(f"Ошибка начисления награды за достижение: {e}"))
 
-                    # Тут можно отправить уведомление в Kafka или WebSocket
                     
             except User.DoesNotExist:
                 self.stdout.write(f"Пользователь {user_id} не найден")
@@ -86,11 +81,10 @@ class Command(BaseCommand):
         """
         context = {
             'trigger': trigger,
-            'event': event_data, # Включает score, lesson_id, course_id и т.д.
+            'event': event_data,
             'user': {}
         }
         
-        # Глобальные факты о пользователе
         try:
             up = UserProgress.objects.get(user=user)
             context['user']['total_lessons'] = up.total_lessons_completed
@@ -107,7 +101,6 @@ class Command(BaseCommand):
         except LearningStats.DoesNotExist:
             pass
             
-        # Факты о прогрессе курса (если событие связано с курсом)
         course_id = event_data.get('course_id')
         if course_id:
             try:

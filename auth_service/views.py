@@ -6,6 +6,7 @@
 """
 
 import datetime
+from axes.utils import reset as axes_reset
 from django.contrib.auth import login, logout
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -22,6 +23,7 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import filters
 from django.db.models import Q
+
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer, 
@@ -76,12 +78,9 @@ class RegisterView(GenericAPIView):
         username = data.get("username")
         email = data.get("email")
 
-        # Проверяем, существует ли уже пользователь с такими данными
         try:
             user = User.objects.get(email=email, username=username)
 
-            # Если пользователь неактивен и недавно зарегистрирован, 
-            # и у него есть активные коды подтверждения
             if (
                 not user.is_active and 
                 (timezone.now() - user.date_joined) < datetime.timedelta(minutes=25) and 
@@ -94,17 +93,14 @@ class RegisterView(GenericAPIView):
         except User.DoesNotExist:
             pass
 
-        # Создаем нового пользователя
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Создаем код подтверждения с увеличенным временем жизни (20 минут)
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.REGISTRATION,
                 expires_at=timezone.now() + datetime.timedelta(minutes=20)
             )
-            # Отправляем код подтверждения асинхронно
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response(
                 {
@@ -134,7 +130,7 @@ class LoginView(GenericAPIView):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             user = serializer.validated_data
-            login(request, user)  # Создаем сессию пользователя
+            login(request, user)
             return Response({"message": "Вы успешно вошли"}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -174,7 +170,7 @@ class LogoutView(GenericAPIView):
         
         Завершает сессию пользователя.
         """
-        logout(request)  # Завершаем сессию
+        logout(request)
         return Response({"message": "Вы успешно вышли"}, status=status.HTTP_200_OK)
 
 
@@ -197,11 +193,9 @@ class UserRoleView(GenericAPIView):
         """
         user = User.objects.get(id=user_id)
         if request.user.role == "admin":
-            # Администраторы имеют полные права
             user.role = request.data.get("role", user.role)
             user.is_active = request.data.get("is_active", user.is_active)
         elif request.user.role == "teacher":
-            # Преподаватели могут только переключать между student и assistant
             if user.role == "student":
                 user.role = "assistant"
             elif user.role == "assistant":
@@ -248,7 +242,6 @@ class StudentsListView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Фильтр по роли (по умолчанию только студенты)
         role_param = request.query_params.get('role')
         if role_param:
             try:
@@ -258,30 +251,25 @@ class StudentsListView(APIView):
         else:
             queryset = User.objects.filter(role=User.Role.STUDENT)
         
-        # Фильтр по активности (по умолчанию только активные, если не указано явно)
         is_active_param = request.query_params.get('is_active')
         
         if is_active_param is None:
-            # По умолчанию показываем только активных
             queryset = queryset.filter(is_active=True)
         elif is_active_param.lower() in ['true', 'false']:
             queryset = queryset.filter(is_active=(is_active_param.lower() == 'true'))
         
-        # Поиск по username или email
         search = request.query_params.get('search', '').strip()
         if search:
             queryset = queryset.filter(
                 Q(username__icontains=search) | Q(email__icontains=search)
             )
         
-        # Сортировка
         ordering = request.query_params.get('ordering', 'username')
         if ordering.lstrip('-') in ['username', 'email', 'date_joined', 'last_login']:
             queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('username')
         
-        # Пагинация
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
         
@@ -312,11 +300,10 @@ class RegistrationConfirmView(GenericAPIView):
         if serializer.is_valid():
             user = serializer.validated_data["user"]
             confirmation = serializer.validated_data["confirmation"]
-            user.is_active = True  # Активируем аккаунт
+            user.is_active = True
             user.save()
-            confirmation.delete()  # Удаляем использованный код
+            confirmation.delete()
             
-            # Автоматически логиним пользователя
             user.backend = 'auth_service.backends.EmailOrUsernameModelBackend'
             login(request, user)
             
@@ -343,13 +330,11 @@ class RequestPasswordResetView(GenericAPIView):
         if serializer.is_valid():
             email = serializer.validated_data["email"]
             user = User.objects.get(email=email)
-            # Создаем код подтверждения смены пароля
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.PASSWORD_CHANGE,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения асинхронно
             send_confirmation_email_task.delay(user.email, confirmation.code, "password_change")
             return Response({"message": "Код подтверждения отправлен на email."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -375,9 +360,11 @@ class ConfirmPasswordResetView(GenericAPIView):
             user = serializer.validated_data["user"]
             confirmation = serializer.validated_data["confirmation"]
             new_password = serializer.validated_data["new_password"]
-            user.set_password(new_password)  # Хешируем и устанавливаем новый пароль
+            user.set_password(new_password)
             user.save()
-            confirmation.delete()  # Удаляем использованный код
+            axes_reset(username=user.email)
+            axes_reset(username=user.username)
+            confirmation.delete()
             return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -402,14 +389,12 @@ class RequestEmailChangeView(GenericAPIView):
         if serializer.is_valid():
             new_email = serializer.validated_data["new_email"]
             user = request.user
-            # Создаем код подтверждения смены email
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.EMAIL_CHANGE,
-                target_email=new_email,  # Сохраняем новый email
+                target_email=new_email,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения на новый email
             send_confirmation_email_task.delay(new_email, confirmation.code, "email_change")
             return Response({"message": "Код подтверждения отправлен на новый email."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -436,13 +421,12 @@ class ConfirmEmailChangeView(GenericAPIView):
             new_email = serializer.validated_data["new_email"]
             confirmation = serializer.validated_data["confirmation"]
 
-            # Проверяем, что новый email не занят
             if User.objects.filter(email=new_email).exists():
                 return Response({"error": "Этот email уже используется."}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 user.email = new_email
                 user.save()
-                confirmation.delete()  # Удаляем использованный код
+                confirmation.delete()
                 return Response({"message": "Email успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -470,17 +454,14 @@ class RegisterResendView(GenericAPIView):
             except User.DoesNotExist:
                 return Response({"error": "Пользователь с таким email не найден."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Проверяем, что аккаунт еще не активирован
             if user.is_active:
                 return Response({"error": "Аккаунт уже активирован."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Создаем новый код подтверждения
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.REGISTRATION,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем новый код подтверждения
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response({"message": "Код подтверждения повторно отправлен."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -506,16 +487,13 @@ class RequestPasswordChangeView(GenericAPIView):
         if serializer.is_valid():
             user = request.user
             new_password = serializer.validated_data["new_password"]
-            # Хешируем новый пароль для безопасного хранения в коде подтверждения
             hashed_new_password = make_password(new_password)
-            # Создаем код подтверждения с хешированным паролем
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.PASSWORD_CHANGE,
                 target_password=hashed_new_password,  # Сохраняем хешированный пароль
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения
             send_confirmation_email_task.delay(user.email, confirmation.code, "password_change")
             return Response({"message": "Код подтверждения для смены пароля отправлен на вашу почту."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -543,10 +521,11 @@ class ConfirmPasswordChangeView(GenericAPIView):
             new_password = serializer.validated_data["new_password"]
             confirmation = serializer.validated_data["confirmation"]
 
-            # Устанавливаем новый пароль (уже хешированный из кода подтверждения)
             user.password = new_password
             user.save()
-            confirmation.delete()  # Удаляем использованный код
+            axes_reset(username=user.email)
+            axes_reset(username=user.username)
+            confirmation.delete()
             return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -582,7 +561,6 @@ class UserViewSet(viewsets.ModelViewSet):
         """Возвращает queryset с возможностью фильтрации."""
         queryset = User.objects.all()
         
-        # Фильтр по роли
         role = self.request.query_params.get('role')
         if role:
             queryset = queryset.filter(role=role)
@@ -612,7 +590,6 @@ class UserViewSet(viewsets.ModelViewSet):
         """Удаление пользователя."""
         instance = self.get_object()
         
-        # Защита от удаления самого себя
         if instance.id == request.user.id:
             return Response(
                 {"error": "Нельзя удалить свой собственный аккаунт"},
@@ -643,7 +620,6 @@ class UserViewSet(viewsets.ModelViewSet):
         
         users = User.objects.filter(id__in=user_ids)
         
-        # Защита от удаления/деактивации самого себя
         if request.user.id in user_ids and action_type in ['delete', 'deactivate']:
             return Response(
                 {"error": "Нельзя выполнить это действие со своим собственным аккаунтом"},

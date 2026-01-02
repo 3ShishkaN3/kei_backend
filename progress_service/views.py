@@ -40,7 +40,6 @@ class UserProgressViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             return UserProgress.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят прогресс своих студентов
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -50,7 +49,6 @@ class UserProgressViewSet(viewsets.ReadOnlyModelViewSet):
                 course_progress__course_id__in=managed_courses
             ).distinct()
         else:
-            # Студенты видят только свой прогресс
             return UserProgress.objects.filter(user=user)
 
     @action(detail=True, methods=['get'])
@@ -58,15 +56,12 @@ class UserProgressViewSet(viewsets.ReadOnlyModelViewSet):
         """Получить сводку прогресса пользователя"""
         progress = self.get_object()
         
-        # Получаем статистику обучения
         learning_stats, _ = LearningStats.objects.get_or_create(user=progress.user)
         
-        # Рассчитываем общий процент завершения
         total_courses = progress.total_courses_enrolled
         completed_courses = progress.total_courses_completed
         overall_completion_percentage = (completed_courses / total_courses * 100) if total_courses > 0 else 0
         
-        # Рассчитываем время обучения в часах
         total_learning_time_hours = progress.total_learning_time_minutes / 60
         
         summary_data = {
@@ -107,7 +102,6 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             queryset = CourseProgress.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят прогресс по своим курсам
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -115,15 +109,12 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
             
             queryset = CourseProgress.objects.filter(course_id__in=managed_courses)
         else:
-            # Студенты видят только свой прогресс
             queryset = CourseProgress.objects.filter(user=user)
         
-        # Фильтрация по курсу
         course_id = self.request.query_params.get('course_id')
         if course_id:
             queryset = queryset.filter(course_id=course_id)
 
-        # Фильтрация по статусу завершения
         completion_status = self.request.query_params.get('completion_status')
         if completion_status == 'completed':
             queryset = queryset.filter(completion_percentage=100)
@@ -145,19 +136,16 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Проверяем права доступа к курсу
         course = get_object_or_404(Course, pk=course_id)
         user = request.user
         
         if user.role not in ['admin', 'teacher', 'assistant']:
-            # Студенты могут видеть рейтинг только по курсам, на которые они записаны
             if not course.enrollments.filter(student=user, status='active').exists():
                 return Response(
                     {"error": "Нет доступа к рейтингу этого курса"},
                     status=status.HTTP_403_FORBIDDEN
                 )
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники могут видеть рейтинг только по своим курсам
             if user.role == 'teacher':
                 if not CourseTeacher.objects.filter(teacher=user, course=course).exists():
                     return Response(
@@ -171,7 +159,6 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
                         status=status.HTTP_403_FORBIDDEN
                     )
         
-        # Получаем рейтинг
         leaderboard = CourseProgress.objects.filter(
             course_id=course_id
         ).select_related('user').order_by(
@@ -179,7 +166,7 @@ class CourseProgressViewSet(viewsets.ReadOnlyModelViewSet):
             '-completed_lessons',
             '-completed_sections',
             '-passed_tests'
-        )[:50]  # Топ-50
+        )[:50]
         
         leaderboard_data = []
         for rank, progress in enumerate(leaderboard, 1):
@@ -213,7 +200,6 @@ class LessonProgressViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             queryset = LessonProgress.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят прогресс по своим курсам
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -221,15 +207,12 @@ class LessonProgressViewSet(viewsets.ReadOnlyModelViewSet):
             
             queryset = LessonProgress.objects.filter(lesson__course_id__in=managed_courses)
         else:
-            # Студенты видят только свой прогресс
             queryset = LessonProgress.objects.filter(user=user)
         
-        # Фильтрация по курсу
         course_id = self.request.query_params.get('course_id')
         if course_id:
             queryset = queryset.filter(lesson__course_id=course_id)
         
-        # Фильтрация по уроку
         lesson_id = self.request.query_params.get('lesson_id')
         if lesson_id:
             queryset = queryset.filter(lesson_id=lesson_id)
@@ -252,7 +235,6 @@ class SectionProgressViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             queryset = SectionProgress.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят прогресс по своим курсам
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -260,25 +242,20 @@ class SectionProgressViewSet(viewsets.ReadOnlyModelViewSet):
             
             queryset = SectionProgress.objects.filter(section__lesson__course_id__in=managed_courses)
         else:
-            # Студенты видят только свой прогресс
             queryset = SectionProgress.objects.filter(user=user)
         
-        # Фильтрация по курсу
         course_id = self.request.query_params.get('course_id')
         if course_id:
             queryset = queryset.filter(section__lesson__course_id=course_id)
         
-        # Фильтрация по уроку
         lesson_id = self.request.query_params.get('lesson_id')
         if lesson_id:
             queryset = queryset.filter(section__lesson_id=lesson_id)
         
-        # Фильтрация по секции
         section_id = self.request.query_params.get('section_id')
         if section_id:
             queryset = queryset.filter(section_id=section_id)
         
-        # Фильтрация по статусу посещения
         visited = self.request.query_params.get('visited')
         if visited is not None:
             visited_bool = visited.lower() == 'true'
@@ -303,7 +280,6 @@ class TestProgressViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             queryset = TestProgress.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят прогресс по своим курсам
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -311,25 +287,20 @@ class TestProgressViewSet(viewsets.ReadOnlyModelViewSet):
             
             queryset = TestProgress.objects.filter(course_id__in=managed_courses)
         else:
-            # Студенты видят только свой прогресс
             queryset = TestProgress.objects.filter(user=user)
         
-        # Фильтрация по курсу
         course_id = self.request.query_params.get('course_id')
         if course_id:
             queryset = queryset.filter(course_id=course_id)
         
-        # Фильтрация по уроку
         lesson_id = self.request.query_params.get('lesson_id')
         if lesson_id:
             queryset = queryset.filter(lesson_id=lesson_id)
         
-        # Фильтрация по типу теста
         test_type = self.request.query_params.get('test_type')
         if test_type:
             queryset = queryset.filter(test_type=test_type)
         
-        # Фильтрация по статусу
         status_filter = self.request.query_params.get('status')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
@@ -352,7 +323,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             return LearningStats.objects.all()
         elif user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят статистику своих студентов
             if user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=user).values_list('course_id', flat=True)
             else:
@@ -362,7 +332,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                 user__course_progress__course_id__in=managed_courses
             ).distinct()
         else:
-            # Студенты видят только свою статистику
             return LearningStats.objects.filter(user=user)
     
     @action(detail=False, methods=['get'])
@@ -390,12 +359,9 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Проверка прав доступа
         if request.user.role == 'admin':
-            # Администратор может видеть всех
             pass
         elif request.user.role in ['teacher', 'assistant']:
-            # Преподаватели и помощники видят только своих студентов
             if request.user.role == 'teacher':
                 managed_courses = CourseTeacher.objects.filter(teacher=request.user).values_list('course_id', flat=True)
             else:
@@ -412,14 +378,12 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_403_FORBIDDEN
                 )
         else:
-            # Студенты могут видеть только свой прогресс
             if target_user != request.user:
                 return Response(
                     {"error": "Нет доступа"},
                     status=status.HTTP_403_FORBIDDEN
                 )
         
-        # Получаем все данные о прогрессе
         user_progress, _ = UserProgress.objects.get_or_create(user=target_user)
         learning_stats, _ = LearningStats.objects.get_or_create(user=target_user)
         
@@ -428,7 +392,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
         section_progress_list = SectionProgress.objects.filter(user=target_user)
         test_progress_list = TestProgress.objects.filter(user=target_user)
         
-        # Создаем полную сводку
         from auth_service.serializers import UserSerializer
         summary = {
             "user": UserSerializer(target_user).data,
@@ -478,13 +441,11 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
             )
         
         if scope == 'all':
-            # Сбрасываем весь прогресс
             CourseProgress.objects.filter(user=target_user).delete()
             LessonProgress.objects.filter(user=target_user).delete()
             SectionProgress.objects.filter(user=target_user).delete()
             TestProgress.objects.filter(user=target_user).delete()
             
-            # Обновляем общий прогресс
             user_progress, _ = UserProgress.objects.get_or_create(user=target_user)
             user_progress.total_courses_enrolled = 0
             user_progress.total_courses_completed = 0
@@ -508,7 +469,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Сбрасываем прогресс по курсу
             CourseProgress.objects.filter(user=target_user, course_id=course_id).delete()
             LessonProgress.objects.filter(user=target_user, lesson__course_id=course_id).delete()
             SectionProgress.objects.filter(user=target_user, section__lesson__course_id=course_id).delete()
@@ -528,7 +488,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Сбрасываем прогресс по уроку
             LessonProgress.objects.filter(user=target_user, lesson_id=lesson_id).delete()
             SectionProgress.objects.filter(user=target_user, section__lesson_id=lesson_id).delete()
             TestProgress.objects.filter(user=target_user, lesson_id=lesson_id).delete()
@@ -547,7 +506,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Сбрасываем прогресс по тесту
             TestProgress.objects.filter(user=target_user, test_id=test_id).delete()
             
             return Response({
@@ -622,7 +580,6 @@ class LearningStatsViewSet(viewsets.ReadOnlyModelViewSet):
         )
         
         if not created:
-            # Обновляем существующий прогресс
             test_progress.last_score = score
             if score > test_progress.best_score:
                 test_progress.best_score = score

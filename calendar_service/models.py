@@ -24,10 +24,9 @@ class Event(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLANNED)
     reminder_enabled = models.BooleanField(default=False)
 
-    # Recurrence
     recurrence_frequency = models.CharField(max_length=16, choices=RecurrenceFreq.choices, default=RecurrenceFreq.NONE)
     recurrence_interval = models.PositiveSmallIntegerField(default=1)
-    recurrence_by_weekday = models.JSONField(default=list, blank=True)  # например, ["MO", "WE"]
+    recurrence_by_weekday = models.JSONField(default=list, blank=True)  # ["MO", "WE"]
     recurrence_until = models.DateField(null=True, blank=True)
     recurrence_count = models.PositiveIntegerField(null=True, blank=True)
 

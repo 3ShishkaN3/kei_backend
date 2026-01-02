@@ -17,7 +17,6 @@ class RuleEngine:
             return True
 
         try:
-            # Debug logging
             print(f"[DEBUG] Evaluating achievement {achievement.id}: {achievement.title}")
             print(f"[DEBUG] Context: {context}")
             
@@ -45,7 +44,6 @@ class RuleEngine:
             triggers__contains=[{'type': event_type}] 
         )
         
-        # Exclude already awarded
         existing_ids = UserAchievement.objects.filter(user=user).values_list('achievement_id', flat=True)
         candidates = candidates.exclude(id__in=existing_ids)
         

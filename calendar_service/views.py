@@ -16,7 +16,6 @@ class IsAdminOrTeacherOrOwner(permissions.BasePermission):
         if request.user.role in ["admin", "teacher"]:
             return True
         if isinstance(obj, Event):
-            # Админ/преподаватель
             if obj.created_by_id == request.user.id:
                 return True
             return obj.participants.filter(user_id=request.user.id).exists()
@@ -36,11 +35,9 @@ class EventViewSet(viewsets.ModelViewSet):
         user: User = self.request.user
         qs = Event.objects.all().order_by("-start_at")
 
-        # Доступ: не админ/преподаватель видит только свои события или участвующие в них
         if user.role not in ["admin", "teacher"]:
             qs = qs.filter(Q(created_by=user) | Q(participants__user=user)).distinct()
 
-        # Фильтры
         participant_id = self.request.query_params.get("participant_id")
         status_param = self.request.query_params.get("status")
         created_by_id = self.request.query_params.get("created_by_id")
@@ -76,7 +73,6 @@ class DayNoteViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user: User = self.request.user
         qs = DayNote.objects.all().order_by("-date", "-created_at")
-        # Не админ/преподаватель может только просматривать свои заметки
         if user.role not in ["admin", "teacher"]:
             qs = qs.filter(user=user)
         else:

@@ -55,11 +55,9 @@ class BonusSerializer(serializers.ModelSerializer):
         if video_file:
             from material_service.models import VideoMaterial
             if instance.video_material:
-                # Update existing material
                 instance.video_material.video_file = video_file
                 instance.video_material.save()
             else:
-                # Create new material
                 video_material = VideoMaterial.objects.create(
                     title=f"Video for bonus: {instance.title}",
                     source_type='file',

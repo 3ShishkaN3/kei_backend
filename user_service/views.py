@@ -18,16 +18,13 @@ class UserProfileView(RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        # Проверяем, запрошен ли профиль другого пользователя
         user_id = self.request.query_params.get('user_id')
         
         if user_id and self.request.user.role in ['admin', 'teacher']:
-            # Администраторы и преподаватели могут просматривать профили других пользователей
             target_user = get_object_or_404(User, id=user_id)
             profile, _ = UserProfile.objects.get_or_create(user=target_user)
             return profile
         
-        # По умолчанию возвращаем свой профиль
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
 
@@ -39,7 +36,6 @@ class UserProfileView(RetrieveUpdateAPIView):
     def put(self, request, *args, **kwargs):
         user_id = request.query_params.get('user_id')
         
-        # Только администраторы могут редактировать профили других пользователей
         if user_id and request.user.role != 'admin':
             return Response(
                 {"error": "Нет прав для редактирования профиля другого пользователя"},
@@ -52,7 +48,6 @@ class UserProfileView(RetrieveUpdateAPIView):
     def delete(self, request, *args, **kwargs):
         user_id = request.query_params.get('user_id')
         
-        # Только администраторы могут очищать профили других пользователей
         if user_id and request.user.role != 'admin':
             return Response(
                 {"error": "Нет прав для очистки профиля другого пользователя"},
@@ -76,16 +71,13 @@ class UserAvatarView(RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        # Проверяем, запрошен ли аватар другого пользователя
         user_id = self.request.query_params.get('user_id')
         
         if user_id and self.request.user.role in ['admin', 'teacher']:
-            # Администраторы и преподаватели могут просматривать аватары других пользователей
             target_user = get_object_or_404(User, id=user_id)
             profile, _ = UserProfile.objects.get_or_create(user=target_user)
             return profile
         
-        # По умолчанию возвращаем свой профиль
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
 
@@ -109,7 +101,6 @@ class UserAvatarView(RetrieveUpdateDestroyAPIView):
     def put(self, request, *args, **kwargs):
         user_id = request.query_params.get('user_id')
         
-        # Только администраторы могут изменять аватары других пользователей
         if user_id and request.user.role != 'admin':
             return Response(
                 {"error": "Нет прав для изменения аватара другого пользователя"},
@@ -125,7 +116,6 @@ class UserAvatarView(RetrieveUpdateDestroyAPIView):
     def delete(self, request, *args, **kwargs):
         user_id = request.query_params.get('user_id')
         
-        # Только администраторы могут удалять аватары других пользователей
         if user_id and request.user.role != 'admin':
             return Response(
                 {"error": "Нет прав для удаления аватара другого пользователя"},

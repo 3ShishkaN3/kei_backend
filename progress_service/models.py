@@ -282,6 +282,5 @@ class LearningStats(models.Model):
         new_level = self.calculate_level()
         if new_level > self.level:
             self.level = new_level
-            # Тут можно добавить событие повышения уровня, если нужно
             
         self.save()

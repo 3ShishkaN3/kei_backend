@@ -30,22 +30,17 @@ class CourseViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = Course.objects.all()
         
-        # Для админов и преподавателей - показываем все курсы с возможностью фильтрации по статусу
         if user.is_authenticated and user.role in ['admin', 'teacher']:
             status_filter = self.request.query_params.get('status')
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
-        # Для помощников - показываем все курсы (они могут быть и студентами, и админами)
         elif user.is_authenticated and user.role == 'assistant':
-            # Проверяем, есть ли у помощника записи на курсы как у студента
             has_enrollments = CourseEnrollment.objects.filter(
                 student=user, 
                 status='active'
             ).exists()
             
             if has_enrollments:
-                # Если помощник записан на курсы как студент, применяем студенческую логику сортировки
-                # Получаем ID курсов, на которые записан помощник
                 enrolled_course_ids = Course.objects.filter(
                     enrollments__student=user, 
                     enrollments__status='active'
@@ -57,7 +52,6 @@ class CourseViewSet(viewsets.ModelViewSet):
                     Q(status='published')
                 ).distinct()
                 
-                # Добавляем аннотации для сортировки
                 queryset = queryset.annotate(
                     is_enrolled=Case(
                         When(id__in=enrolled_course_ids, then=1),
@@ -72,30 +66,23 @@ class CourseViewSet(viewsets.ModelViewSet):
                     )
                 )
                 
-                # Сортируем: сначала записанные курсы, затем доступные
                 queryset = queryset.order_by('is_enrolled', 'course_priority', '-created_at')
             else:
-                # Если помощник не записан на курсы, показываем все курсы с возможностью фильтрации
                 status_filter = self.request.query_params.get('status')
                 if status_filter:
                     queryset = queryset.filter(status=status_filter)
-        # Для обычных пользователей (студентов) - специальная логика сортировки
         elif user.is_authenticated and user.role == 'student':
-            # Получаем ID курсов, на которые записан пользователь
             enrolled_course_ids = Course.objects.filter(
                 enrollments__student=user, 
                 enrollments__status='active'
             ).values_list('id', flat=True)
-            
-            # Получаем все курсы, которые должны быть видны студенту
-            # (записанные + бесплатные + опубликованные)
+
             queryset = Course.objects.filter(
                 Q(id__in=enrolled_course_ids) |
                 Q(status='free') |
                 Q(status='published')
             ).distinct()
             
-            # Добавляем аннотации для сортировки
             queryset = queryset.annotate(
                 is_enrolled=Case(
                     When(id__in=enrolled_course_ids, then=1),
@@ -110,11 +97,8 @@ class CourseViewSet(viewsets.ModelViewSet):
                 )
             )
             
-            # Сортируем: сначала записанные курсы, затем доступные
-            # Внутри каждой группы: сначала платные (published), затем бесплатные (free)
             queryset = queryset.order_by('is_enrolled', 'course_priority', '-created_at')
         else:
-            # Для неавторизованных пользователей - только опубликованные курсы
             queryset = queryset.filter(status='published')
         
         created_by = self.request.query_params.get('created_by')
@@ -308,7 +292,6 @@ class CourseViewSet(viewsets.ModelViewSet):
         errors = []
         
         for student in students:
-            # Проверяем, не является ли студент преподавателем или помощником этого курса
             if CourseTeacher.objects.filter(course=course, teacher=student).exists() or \
                CourseAssistant.objects.filter(course=course, assistant=student).exists():
                 errors.append(f"{student.username} является преподавателем или помощником курса")
@@ -424,7 +407,6 @@ class CourseViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Проверяем права преподавателя
         if request.user.role == 'teacher':
             teacher_courses = CourseTeacher.objects.filter(teacher=request.user).values_list('course_id', flat=True)
             enrollments = CourseEnrollment.objects.filter(
@@ -439,7 +421,6 @@ class CourseViewSet(viewsets.ModelViewSet):
         completed_courses = enrollments.filter(status='completed').count()
         dropped_courses = enrollments.filter(status='dropped').count()
         
-        # Получаем детали записей
         enrollment_data = CourseEnrollmentSerializer(enrollments, many=True).data
         
         return Response({

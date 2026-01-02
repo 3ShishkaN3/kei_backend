@@ -64,7 +64,6 @@ class EventSerializer(serializers.ModelSerializer):
         user: User = self.context["request"].user
         event = Event.objects.create(created_by=user, **validated_data)
 
-        # Доступ: студенты/ассистенты могут только пригласить себя
         if user.role in ["student", "assistant"]:
             participant_ids = [user.id]
 
@@ -72,7 +71,6 @@ class EventSerializer(serializers.ModelSerializer):
         EventParticipant.objects.bulk_create([
             EventParticipant(event=event, user=u) for u in users
         ], ignore_conflicts=True)
-        # Убеждаемся, что создатель является участником, если никто не приглашен
         if not event.participants.exists():
             EventParticipant.objects.create(event=event, user=user)
         return event
@@ -82,7 +80,6 @@ class EventSerializer(serializers.ModelSerializer):
         event = super().update(instance, validated_data)
         if participant_ids is not None:
             user: User = self.context["request"].user
-            # Студенты/ассистенты могут только оставить себя участником
             if user.role in ["student", "assistant"]:
                 participant_ids = [user.id]
             users = User.objects.filter(id__in=set(participant_ids))

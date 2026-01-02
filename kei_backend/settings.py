@@ -240,30 +240,29 @@ LOGGING = {
     },
 }
 
+if not DEBUG:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+        SENTRY_DSN = config('SENTRY_DSN', default='')
+        if SENTRY_DSN:
+            sentry_sdk.init(
+                dsn=SENTRY_DSN,
+                integrations=[DjangoIntegration()],
+                send_default_pii=True,
+                traces_sample_rate=0.0,
+            )
+    except Exception:
+        pass
 
-try:
-    import sentry_sdk
-    from sentry_sdk.integrations.django import DjangoIntegration
-    SENTRY_DSN = config('SENTRY_DSN', default='')
-    if SENTRY_DSN:
-        sentry_sdk.init(
-            dsn=SENTRY_DSN,
-            integrations=[DjangoIntegration()],
-            send_default_pii=True,
-            traces_sample_rate=0.0,
-        )
-except Exception:
-    pass
+USE_S3 = config('USE_S3', cast=bool, default=False)
 
-USE_S3 = os.environ.get('USE_S3', 'False') == 'True'
-
-
-if USE_S3:
-    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
-    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
-    AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL')
-    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'ru-central-1')
+if USE_S3 and not DEBUG:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ru-central-1')
     
     STORAGES = {
         "default": {

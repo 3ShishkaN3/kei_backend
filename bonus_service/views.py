@@ -12,13 +12,10 @@ class BonusViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAdminUser()] # Or custom IsTeacher permission
+            return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        # Only show video bonuses for now as per requirement, or all?
-        # User said "Implement only 1st point", but placeholders for others.
-        # So we can return all, and frontend handles display.
         return Bonus.objects.all().order_by('-created_at')
 
     @action(detail=True, methods=['post'])

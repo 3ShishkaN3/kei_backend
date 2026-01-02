@@ -23,12 +23,9 @@ class LLMGradingService:
         
         try:
             response = self.model.generate_content(prompt)
-            # Попытка распарсить JSON из ответа
-            # Gemini может возвращать JSON в тройных обратных кавычках с префиксом json
             cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
             result = json.loads(cleaned_response)
             
-            # Валидация результата
             if 'is_correct' not in result or 'score' not in result:
                 raise ValueError("Ответ LLM не содержит обязательных полей 'is_correct' и 'score'.")
 

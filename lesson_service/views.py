@@ -27,10 +27,9 @@ class LessonPagination(PageNumberPagination):
 class LessonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, LessonPermission]
     pagination_class = LessonPagination
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.SearchFilter]
     search_fields = ['title',]
-    ordering_fields = ['created_at', 'title', 'updated_at']
-    ordering = ['-created_at']
+    ordering = ['order', 'id']
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -50,7 +49,8 @@ class LessonViewSet(viewsets.ModelViewSet):
 
         queryset = Lesson.objects.filter(course=course)\
                                  .select_related('created_by')\
-                                 .prefetch_related('sections') 
+                                 .prefetch_related('sections')\
+                                 .order_by('order', 'id')
         return queryset
 
     def retrieve(self, request, *args, **kwargs):
@@ -142,6 +142,60 @@ class LessonViewSet(viewsets.ModelViewSet):
 
         lessons = Lesson.objects.all().select_related('course').values('id', 'title', 'course__title')
         return Response(list(lessons))
+
+    @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
+    def reorder_lessons(self, request, course_pk=None):
+        course = get_object_or_404(Course, pk=course_pk)
+
+        data = request.data
+        if not isinstance(data, list):
+            return Response({"error": "Ожидается список объектов с 'id' и 'order'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        updates_map = {}
+        new_orders_set = set()
+        lesson_ids_from_payload = []
+
+        for item in data:
+            try:
+                lesson_id = int(item.get('id'))
+                new_order = int(item.get('order'))
+            except (ValueError, TypeError, AttributeError):
+                 return Response({"error": "Каждый элемент должен быть словарем с целыми 'id' и 'order'."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if new_order < 0:
+                return Response({"error": "Порядок (order) не может быть отрицательным."}, status=status.HTTP_400_BAD_REQUEST)
+            if new_order in new_orders_set:
+                return Response({"error": f"Порядок {new_order} дублируется в запросе."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            new_orders_set.add(new_order)
+            lesson_ids_from_payload.append(lesson_id)
+            updates_map[lesson_id] = new_order
+        
+        lessons_to_update_qs = Lesson.objects.filter(course=course, id__in=lesson_ids_from_payload)
+        
+        if lessons_to_update_qs.count() != len(set(lesson_ids_from_payload)):
+            return Response({"error": "Один или несколько уроков не найдены в данном курсе."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                max_current = Lesson.objects.filter(course=course).aggregate(Max('order'))['order__max'] or 0
+                temp_offset = max_current + 1000
+                
+                lessons_instances = list(lessons_to_update_qs)
+                for i, obj in enumerate(lessons_instances):
+                    obj.order = temp_offset + i
+                    obj.save(update_fields=['order'])
+                
+                for obj in lessons_instances:
+                    obj.order = updates_map[obj.id]
+                    obj.save(update_fields=['order'])
+            
+            return Response({"status": "Порядок уроков обновлен"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    
 
 
 class SectionViewSet(viewsets.ModelViewSet):
@@ -411,13 +465,11 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         if not CanViewLessonOrSectionContent().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет доступа к этому разделу.")
 
-        # Получаем сам item из queryset viewset-а
         item = get_object_or_404(
             SectionItem.objects.select_related('section'),
             pk=pk,
             section=section
         )
-        # Для тестов не отмечаем просмотр — у них отдельная логика
         if item.item_type == 'test':
             return Response({"detail": "Для тестов просмотр не фиксируется этим методом."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -504,9 +556,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет прав на изменение этого элемента.")
 
-        # validated_material_data содержит данные для обновления материала/теста
         material_data_for_update = serializer.validated_data.get('validated_material_data')
-        # item_type берется из validated_data, если он был передан для изменения, иначе из instance
         item_type = serializer.validated_data.get('item_type', current_instance.item_type)
         
         existing_type = serializer.initial_data.get('existing_content_type')
@@ -517,8 +567,8 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 content_object_to_update_or_replace = current_instance.content_object
-                new_content_type_for_item = current_instance.content_type # По умолчанию не меняется
-                new_object_id_for_item = current_instance.object_id     # По умолчанию не меняется
+                new_content_type_for_item = current_instance.content_type
+                new_object_id_for_item = current_instance.object_id
 
                 if material_data_for_update:
                     current_content_model_class = content_object_to_update_or_replace.__class__ if content_object_to_update_or_replace else None
@@ -533,7 +583,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                             new_test_serializer = test_serializer_class(data=material_data_for_update, context=serializer.context)
                             new_test_serializer.is_valid(raise_exception=True)
                             content_object_to_update_or_replace = new_test_serializer.save()
-                        else: # Для простых материалов
+                        else:
                             content_object_to_update_or_replace = target_material_model_class.objects.create(**material_data_for_update)
                         
                         new_content_type_for_item = ContentType.objects.get_for_model(target_material_model_class)
@@ -541,7 +591,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                     else:
                         if item_type == 'test':
                             test_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
-                            # partial=True важно для обновления
                             test_serializer_instance = test_serializer_class(
                                 instance=content_object_to_update_or_replace, 
                                 data=material_data_for_update, 
@@ -550,7 +599,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                             )
                             if test_serializer_instance.is_valid(raise_exception=True):
                                 content_object_to_update_or_replace = test_serializer_instance.save()
-                        else: # Для простых материалов
+                        else:
                             for key, value in material_data_for_update.items():
                                 setattr(content_object_to_update_or_replace, key, value)
                             content_object_to_update_or_replace.save()
@@ -610,7 +659,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         
         items_to_update_qs = SectionItem.objects.filter(section=section, id__in=item_ids_from_payload)
         
-        if items_to_update_qs.count() != len(set(item_ids_from_payload)): # Убедимся, что ID уникальны в payload
+        if items_to_update_qs.count() != len(set(item_ids_from_payload)):
             return Response(
                 {"detail": "Обнаружены дублирующиеся ID элементов в запросе или не все элементы найдены."},
                 status=status.HTTP_400_BAD_REQUEST

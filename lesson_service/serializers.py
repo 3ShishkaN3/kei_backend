@@ -313,11 +313,12 @@ class LessonListSerializer(serializers.ModelSerializer):
     section_count = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
     completion_percentage = serializers.SerializerMethodField()
+    order = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
-            'id', 'title', 'cover_image', 'course_id',
+            'id', 'title', 'cover_image', 'course_id', 'order',
             'created_by_name', 'created_at', 'updated_at', 'section_count',
             'completion_percentage'
         ]
@@ -355,16 +356,16 @@ class LessonDetailSerializer(serializers.ModelSerializer):
     is_completed = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
     completion_percentage = serializers.SerializerMethodField()
+    order = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
-            'id', 'course_id', 'title', 'cover_image',
+            'id', 'course_id', 'title', 'cover_image', 'order',
             'created_by', 'created_at', 'updated_at', 'sections', 'is_completed',
             'completion_percentage'
         ]
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage')
-
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage', 'order')
 
     def get_is_completed(self, obj):
         request = self.context.get('request')

@@ -28,7 +28,6 @@ def send_confirmation_email(email, code, purpose):
     Returns:
         None: Функция логирует результат отправки
     """
-    # Определяем тему и текст письма в зависимости от цели
     if purpose == "registration":
         subject = "Подтверждение регистрации"
         message = f"Ваш код подтверждения регистрации: {code}"
@@ -43,13 +42,12 @@ def send_confirmation_email(email, code, purpose):
         message = f"Ваш код подтверждения: {code}"
     
     try:
-        # Отправляем email с настройками из Django settings
         send_mail(
             subject,
             message,
-            settings.DEFAULT_FROM_EMAIL,  # Отправитель из настроек
+            settings.DEFAULT_FROM_EMAIL,
             [email],
-            fail_silently=False,  # Вызываем исключение при ошибке
+            fail_silently=False,
         )
         logger.info(f"Письмо успешно отправлено на {email} для {purpose}")
     except Exception as e:

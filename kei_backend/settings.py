@@ -8,17 +8,7 @@ SECRET_KEY = config('SECRET_KEY')
 
 DEBUG = config('DEBUG', cast=bool)
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
-
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN')
-TEACHER_CHAT_ID = config('TEACHER_CHAT_ID')
-
-SWAGGER_SETTINGS = {
-    'DEFAULT_AUTO_SCHEMA_CLASS': 'drf_yasg.inspectors.SwaggerAutoSchema',
-}
 
 
 CELERY_BROKER_URL = config('CELERY_BROKER_URL')
@@ -64,6 +54,10 @@ INSTALLED_APPS = [
     'material_service',
     'dict_service',
     'progress_service',
+    'calendar_service',
+    'achievement_service',
+    'bonus_service',
+    'storages',
 ]
 
 MIDDLEWARE = [
@@ -77,6 +71,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'axes.middleware.AxesMiddleware',
 ]
+
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN')
+TEACHER_CHAT_ID = config('TEACHER_CHAT_ID')
+
+SWAGGER_SETTINGS = {
+    'DEFAULT_AUTO_SCHEMA_CLASS': 'drf_yasg.inspectors.SwaggerAutoSchema',
+}
 
 ROOT_URLCONF = 'kei_backend.urls'
 
@@ -168,6 +172,7 @@ CSRF_TRUSTED_ORIGINS = [
 
 
 AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
     'auth_service.backends.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
@@ -235,3 +240,52 @@ LOGGING = {
     },
 }
 
+if not DEBUG:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+        SENTRY_DSN = config('SENTRY_DSN', default='')
+        if SENTRY_DSN:
+            sentry_sdk.init(
+                dsn=SENTRY_DSN,
+                integrations=[DjangoIntegration()],
+                send_default_pii=True,
+                traces_sample_rate=0.0,
+            )
+    except Exception:
+        pass
+
+USE_S3 = config('USE_S3', cast=bool, default=False)
+
+if USE_S3 and not DEBUG:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ru-central-1')
+    
+    STORAGES = {
+        "default": {
+            "BACKEND": "kei_backend.storage_backends.MediaStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = 'private'
+    AWS_QUERYSTRING_AUTH = True
+    
+
+    
+    STATIC_URL = '/static/'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'
+else:
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
+    STATIC_URL = '/static/'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'

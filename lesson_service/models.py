@@ -29,11 +29,17 @@ class Lesson(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
+    order = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Порядок в курсе",
+        help_text="Определяет ручной порядок отображения уроков внутри курса"
+    )
 
     class Meta:
         verbose_name = "Урок"
         verbose_name_plural = "Уроки"
-        ordering = ['created_at']
+        ordering = ['course', 'order', 'id']
+        unique_together = ('course', 'order')
 
     def __str__(self):
         return f"{self.title} (Курс: {self.course.title})"

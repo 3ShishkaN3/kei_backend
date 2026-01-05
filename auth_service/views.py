@@ -6,6 +6,7 @@
 """
 
 import datetime
+from axes.utils import reset as axes_reset
 from django.contrib.auth import login, logout
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -17,8 +18,12 @@ from .models import ConfirmationCode, User
 from .tasks import send_confirmation_email_task
 from django.middleware.csrf import get_token
 from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import filters
+from django.db.models import Q
+
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer, 
@@ -32,6 +37,9 @@ from .serializers import (
     ResendRegisterSerializer,
     RequestPasswordChangeSerializer,
     ConfirmPasswordChangeSerializer,
+    AdminCreateUserSerializer,
+    AdminUpdateUserSerializer,
+    BulkUserOperationSerializer,
 )
 
 
@@ -70,12 +78,9 @@ class RegisterView(GenericAPIView):
         username = data.get("username")
         email = data.get("email")
 
-        # Проверяем, существует ли уже пользователь с такими данными
         try:
             user = User.objects.get(email=email, username=username)
 
-            # Если пользователь неактивен и недавно зарегистрирован, 
-            # и у него есть активные коды подтверждения
             if (
                 not user.is_active and 
                 (timezone.now() - user.date_joined) < datetime.timedelta(minutes=25) and 
@@ -88,17 +93,14 @@ class RegisterView(GenericAPIView):
         except User.DoesNotExist:
             pass
 
-        # Создаем нового пользователя
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Создаем код подтверждения с увеличенным временем жизни (20 минут)
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.REGISTRATION,
                 expires_at=timezone.now() + datetime.timedelta(minutes=20)
             )
-            # Отправляем код подтверждения асинхронно
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response(
                 {
@@ -128,7 +130,7 @@ class LoginView(GenericAPIView):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             user = serializer.validated_data
-            login(request, user)  # Создаем сессию пользователя
+            login(request, user)
             return Response({"message": "Вы успешно вошли"}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -168,7 +170,7 @@ class LogoutView(GenericAPIView):
         
         Завершает сессию пользователя.
         """
-        logout(request)  # Завершаем сессию
+        logout(request)
         return Response({"message": "Вы успешно вышли"}, status=status.HTTP_200_OK)
 
 
@@ -191,11 +193,9 @@ class UserRoleView(GenericAPIView):
         """
         user = User.objects.get(id=user_id)
         if request.user.role == "admin":
-            # Администраторы имеют полные права
             user.role = request.data.get("role", user.role)
             user.is_active = request.data.get("is_active", user.is_active)
         elif request.user.role == "teacher":
-            # Преподаватели могут только переключать между student и assistant
             if user.role == "student":
                 user.role = "assistant"
             elif user.role == "assistant":
@@ -204,6 +204,81 @@ class UserRoleView(GenericAPIView):
                 return Response({"error": "Недостаточно прав"}, status=status.HTTP_403_FORBIDDEN)
         user.save()
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class StudentsPagination(PageNumberPagination):
+    """Пагинация для списка учеников."""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
+class StudentsListView(APIView):
+    """
+    Представление для получения списка учеников с расширенной фильтрацией.
+    
+    Позволяет администраторам и преподавателям получать список учеников
+    с фильтрацией по статусу активности, поиском и пагинацией.
+    """
+    
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StudentsPagination
+    
+    def get(self, request):
+        """
+        Возвращает список учеников с возможностью фильтрации.
+        
+        Доступно только для администраторов и преподавателей.
+        
+        Параметры запроса:
+        - is_active: true/false - фильтр по статусу активности (по умолчанию только активные)
+        - search: строка поиска по username или email
+        - role: фильтр по роли (по умолчанию student)
+        """
+        
+        if request.user.role not in ["admin", "teacher"]:
+            return Response(
+                {"error": "Недостаточно прав"}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        role_param = request.query_params.get('role')
+        if role_param:
+            try:
+                queryset = User.objects.filter(role=role_param)
+            except ValueError:
+                queryset = User.objects.filter(role=User.Role.STUDENT)
+        else:
+            queryset = User.objects.filter(role=User.Role.STUDENT)
+        
+        is_active_param = request.query_params.get('is_active')
+        
+        if is_active_param is None:
+            queryset = queryset.filter(is_active=True)
+        elif is_active_param.lower() in ['true', 'false']:
+            queryset = queryset.filter(is_active=(is_active_param.lower() == 'true'))
+        
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) | Q(email__icontains=search)
+            )
+        
+        ordering = request.query_params.get('ordering', 'username')
+        if ordering.lstrip('-') in ['username', 'email', 'date_joined', 'last_login']:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('username')
+        
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        
+        if page is not None:
+            serializer = UserSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = UserSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RegistrationConfirmView(GenericAPIView):
@@ -225,10 +300,14 @@ class RegistrationConfirmView(GenericAPIView):
         if serializer.is_valid():
             user = serializer.validated_data["user"]
             confirmation = serializer.validated_data["confirmation"]
-            user.is_active = True  # Активируем аккаунт
+            user.is_active = True
             user.save()
-            confirmation.delete()  # Удаляем использованный код
-            return Response({"message": "Email успешно подтверждён."}, status=status.HTTP_200_OK)
+            confirmation.delete()
+            
+            user.backend = 'auth_service.backends.EmailOrUsernameModelBackend'
+            login(request, user)
+            
+            return Response({"message": "Email успешно подтверждён. Вы вошли в систему."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -236,7 +315,7 @@ class RequestPasswordResetView(GenericAPIView):
     """
     Представление для запроса сброса пароля.
     
-    Отправляет код подтверждения на email для сброса пароля.
+    Отправляет код подтверждения на email для смены пароля.
     """
     
     serializer_class = RequestPasswordResetSerializer
@@ -251,13 +330,11 @@ class RequestPasswordResetView(GenericAPIView):
         if serializer.is_valid():
             email = serializer.validated_data["email"]
             user = User.objects.get(email=email)
-            # Создаем код подтверждения смены пароля
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.PASSWORD_CHANGE,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения асинхронно
             send_confirmation_email_task.delay(user.email, confirmation.code, "password_change")
             return Response({"message": "Код подтверждения отправлен на email."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -283,9 +360,11 @@ class ConfirmPasswordResetView(GenericAPIView):
             user = serializer.validated_data["user"]
             confirmation = serializer.validated_data["confirmation"]
             new_password = serializer.validated_data["new_password"]
-            user.set_password(new_password)  # Хешируем и устанавливаем новый пароль
+            user.set_password(new_password)
             user.save()
-            confirmation.delete()  # Удаляем использованный код
+            axes_reset(username=user.email)
+            axes_reset(username=user.username)
+            confirmation.delete()
             return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -310,14 +389,12 @@ class RequestEmailChangeView(GenericAPIView):
         if serializer.is_valid():
             new_email = serializer.validated_data["new_email"]
             user = request.user
-            # Создаем код подтверждения смены email
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.EMAIL_CHANGE,
-                target_email=new_email,  # Сохраняем новый email
+                target_email=new_email,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения на новый email
             send_confirmation_email_task.delay(new_email, confirmation.code, "email_change")
             return Response({"message": "Код подтверждения отправлен на новый email."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -344,13 +421,12 @@ class ConfirmEmailChangeView(GenericAPIView):
             new_email = serializer.validated_data["new_email"]
             confirmation = serializer.validated_data["confirmation"]
 
-            # Проверяем, что новый email не занят
             if User.objects.filter(email=new_email).exists():
                 return Response({"error": "Этот email уже используется."}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 user.email = new_email
                 user.save()
-                confirmation.delete()  # Удаляем использованный код
+                confirmation.delete()
                 return Response({"message": "Email успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -378,17 +454,14 @@ class RegisterResendView(GenericAPIView):
             except User.DoesNotExist:
                 return Response({"error": "Пользователь с таким email не найден."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Проверяем, что аккаунт еще не активирован
             if user.is_active:
                 return Response({"error": "Аккаунт уже активирован."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Создаем новый код подтверждения
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.REGISTRATION,
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем новый код подтверждения
             send_confirmation_email_task.delay(user.email, confirmation.code, "registration")
             return Response({"message": "Код подтверждения повторно отправлен."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -414,16 +487,13 @@ class RequestPasswordChangeView(GenericAPIView):
         if serializer.is_valid():
             user = request.user
             new_password = serializer.validated_data["new_password"]
-            # Хешируем новый пароль для безопасного хранения в коде подтверждения
             hashed_new_password = make_password(new_password)
-            # Создаем код подтверждения с хешированным паролем
             confirmation = ConfirmationCode.objects.create(
                 user=user,
                 code_type=ConfirmationCode.PASSWORD_CHANGE,
                 target_password=hashed_new_password,  # Сохраняем хешированный пароль
                 expires_at=timezone.now() + datetime.timedelta(minutes=10)
             )
-            # Отправляем код подтверждения
             send_confirmation_email_task.delay(user.email, confirmation.code, "password_change")
             return Response({"message": "Код подтверждения для смены пароля отправлен на вашу почту."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -451,9 +521,134 @@ class ConfirmPasswordChangeView(GenericAPIView):
             new_password = serializer.validated_data["new_password"]
             confirmation = serializer.validated_data["confirmation"]
 
-            # Устанавливаем новый пароль (уже хешированный из кода подтверждения)
             user.password = new_password
             user.save()
-            confirmation.delete()  # Удаляем использованный код
+            axes_reset(username=user.email)
+            axes_reset(username=user.username)
+            confirmation.delete()
             return Response({"message": "Пароль успешно изменён."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для управления пользователями администратором.
+    
+    Предоставляет полный CRUD для пользователей, доступный только администраторам.
+    """
+    
+    permission_classes = [permissions.IsAdminUser]
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    lookup_field = 'id'
+    pagination_class = StudentsPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['username', 'email']
+    ordering_fields = ['username', 'email', 'date_joined', 'last_login']
+    ordering = ['username']
+    
+    def get_serializer_class(self):
+        """Возвращает соответствующий сериализатор в зависимости от действия."""
+        if self.action == 'create':
+            return AdminCreateUserSerializer
+        elif self.action in ['update', 'partial_update']:
+            return AdminUpdateUserSerializer
+        elif self.action == 'bulk_operation':
+            return BulkUserOperationSerializer
+        return UserSerializer
+    
+    def get_queryset(self):
+        """Возвращает queryset с возможностью фильтрации."""
+        queryset = User.objects.all()
+        
+        role = self.request.query_params.get('role')
+        if role:
+            queryset = queryset.filter(role=role)
+
+        is_active_param = self.request.query_params.get('is_active', "False")
+        
+        if is_active_param is not None and is_active_param.lower() in ['true', 'false']:
+            if is_active_param.lower() == 'true': queryset = queryset.filter(is_active=True)
+        else:
+            queryset = queryset.filter(is_active=True)
+        
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) | Q(email__icontains=search)
+            )
+        
+        return queryset.order_by('username')
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Получение детальной информации о пользователе."""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Удаление пользователя."""
+        instance = self.get_object()
+        
+        if instance.id == request.user.id:
+            return Response(
+                {"error": "Нельзя удалить свой собственный аккаунт"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        instance.delete()
+        return Response(
+            {"message": "Пользователь успешно удалён"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+    
+    @action(detail=False, methods=['post'], serializer_class=BulkUserOperationSerializer)
+    def bulk_operation(self, request):
+        """
+        Массовые операции с пользователями.
+        
+        Действия:
+        - activate: активация пользователей
+        - deactivate: деактивация пользователей
+        - delete: удаление пользователей
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user_ids = serializer.validated_data['user_ids']
+        action_type = serializer.validated_data['action']
+        
+        users = User.objects.filter(id__in=user_ids)
+        
+        if request.user.id in user_ids and action_type in ['delete', 'deactivate']:
+            return Response(
+                {"error": "Нельзя выполнить это действие со своим собственным аккаунтом"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if action_type == 'activate':
+            updated = users.update(is_active=True)
+            return Response({
+                "message": f"Активировано пользователей: {updated}",
+                "updated_count": updated
+            }, status=status.HTTP_200_OK)
+        
+        elif action_type == 'deactivate':
+            updated = users.update(is_active=False)
+            return Response({
+                "message": f"Деактивировано пользователей: {updated}",
+                "updated_count": updated
+            }, status=status.HTTP_200_OK)
+        
+        elif action_type == 'delete':
+            count = users.count()
+            users.delete()
+            return Response({
+                "message": f"Удалено пользователей: {count}",
+                "deleted_count": count
+            }, status=status.HTTP_200_OK)
+        
+        return Response(
+            {"error": "Неизвестное действие"},
+            status=status.HTTP_400_BAD_REQUEST
+        )

@@ -22,7 +22,5 @@ def get_axes_username(request, credentials):
     """
     username = credentials.get("username")
     if not username:
-        # Если username нет в credentials, ищем в POST данных
         username = request.POST.get("username") or request.POST.get("email")
-    # Нормализуем к нижнему регистру для единообразия
     return username.lower() if username else None

@@ -58,8 +58,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
                 try:
                     data = serializer_class(content_object, context=context).data
-                    # Если это тест и у пользователя включено отображение ответов —
-                    # прикладывается последняя отправка пользователя по этому тесту в рамках этого элемента раздела
                     if item_type == 'test' and context.get('request') and hasattr(context['request'], 'user'):
                         user = context['request'].user
                         user_settings = getattr(user, 'settings', None)
@@ -107,7 +105,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
             if csrf:
                 headers['X-CSRFTOKEN'] = csrf
             cache = self.context.setdefault('_progress_cache', {})
-            # Кэш по тестам на уровне урока
             if obj.item_type == 'test':
                 lesson_id = obj.section.lesson.id
                 tests_cache = cache.setdefault('tests_by_lesson', {})
@@ -124,7 +121,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
                     tests_cache[lesson_id] = mapping
                 status = mapping.get(int(obj.object_id))
                 return status == 'passed'
-            # Для нетестовых элементов используется кэш секций
             section_cache = cache.setdefault('sections', {})
             s_entry = section_cache.get(obj.section.id)
             if s_entry is None:
@@ -143,7 +139,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
             completion = float(s_entry.get('completion_percentage', 0))
             if completion >= 99.5:
                 return True
-            # Если в секции нет тестов и секция посещена — материалы изучены
             if s_entry.get('total_tests', 0) == 0 and s_entry.get('is_visited'):
                 return True
             return False
@@ -299,10 +294,8 @@ class SectionSerializer(serializers.ModelSerializer):
             completion = float(entry.get('completion_percentage', 0))
             if completion >= 99.5:
                 return True
-            # Альтернативный флажок завершения
             if entry.get('completed_at'):
                 return True
-            # Если тестов нет — в progress_service секция завершена при посещении
             if entry.get('total_tests', 0) == 0 and entry.get('is_visited'):
                 return True
             return False
@@ -320,11 +313,12 @@ class LessonListSerializer(serializers.ModelSerializer):
     section_count = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
     completion_percentage = serializers.SerializerMethodField()
+    order = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
-            'id', 'title', 'cover_image', 'course_id',
+            'id', 'title', 'cover_image', 'course_id', 'order',
             'created_by_name', 'created_at', 'updated_at', 'section_count',
             'completion_percentage'
         ]
@@ -362,16 +356,16 @@ class LessonDetailSerializer(serializers.ModelSerializer):
     is_completed = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
     completion_percentage = serializers.SerializerMethodField()
+    order = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
-            'id', 'course_id', 'title', 'cover_image',
+            'id', 'course_id', 'title', 'cover_image', 'order',
             'created_by', 'created_at', 'updated_at', 'sections', 'is_completed',
             'completion_percentage'
         ]
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage')
-
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage', 'order')
 
     def get_is_completed(self, obj):
         request = self.context.get('request')

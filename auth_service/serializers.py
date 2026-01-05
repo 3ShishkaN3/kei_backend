@@ -39,7 +39,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         
         Проверяет совпадение паролей и нормализует email к нижнему регистру.
         """
-        # Нормализуем email для единообразия
         attrs["email"] = attrs["email"].lower()
         if attrs["password"] != attrs["password2"]:
             raise serializers.ValidationError({"password": "Пароли не совпадают"})
@@ -52,7 +51,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         Удаляет password2 из данных и создает неактивного пользователя
         (активация происходит после подтверждения email).
         """
-        validated_data.pop("password2")  # Удаляем дублирующее поле
+        validated_data.pop("password2")
         user = User.objects.create_user(**validated_data)
         return user
 
@@ -76,14 +75,12 @@ class LoginSerializer(serializers.Serializer):
         и проверяет активность аккаунта.
         """
         request = self.context.get("request")
-        # Поддерживаем вход как по username, так и по email
         username = data.get("username") or data.get("email") 
         password = data.get("password")
 
         if not username or not password:
             raise serializers.ValidationError("Требуется username или email, а также пароль")
 
-        # Аутентифицируем пользователя
         user = authenticate(request=request, username=username, password=password)
         if not user:
             raise serializers.ValidationError("Неверный логин или пароль")
@@ -115,7 +112,6 @@ class ConfirmEmailSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("Пользователь с таким email не найден.")
         
-        # Ищем активный код подтверждения регистрации
         qs = ConfirmationCode.objects.filter(user=user, code=data["code"], code_type=ConfirmationCode.REGISTRATION)
         if not qs.exists():
             raise serializers.ValidationError("Неверный код подтверждения.")
@@ -124,7 +120,6 @@ class ConfirmEmailSerializer(serializers.Serializer):
         if confirmation.is_expired():
             raise serializers.ValidationError("Код подтверждения истёк.")
         
-        # Добавляем объекты в validated_data для использования в view
         data["user"] = user
         data["confirmation"] = confirmation
         return data
@@ -179,7 +174,6 @@ class ConfirmPasswordResetSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("Пользователь не найден.")
         
-        # Ищем активный код подтверждения смены пароля
         qs = ConfirmationCode.objects.filter(user=user, code=data["code"], code_type=ConfirmationCode.PASSWORD_CHANGE)
         if not qs.exists():
             raise serializers.ValidationError("Неверный код подтверждения.")
@@ -188,7 +182,6 @@ class ConfirmPasswordResetSerializer(serializers.Serializer):
         if confirmation.is_expired():
             raise serializers.ValidationError("Код подтверждения истёк.")
         
-        # Добавляем объекты в validated_data для использования в view
         data["user"] = user
         data["confirmation"] = confirmation
         data["new_password"] = data["new_password"]
@@ -237,7 +230,6 @@ class ConfirmEmailChangeSerializer(serializers.Serializer):
         
         Проверяет валидность кода и его срок действия.
         """
-        # Ищем активный код подтверждения смены email
         qs = ConfirmationCode.objects.filter(code=data["code"], code_type=ConfirmationCode.EMAIL_CHANGE)
         if not qs.exists():
             raise serializers.ValidationError("Неверный код подтверждения.")
@@ -246,7 +238,6 @@ class ConfirmEmailChangeSerializer(serializers.Serializer):
         if confirmation.is_expired():
             raise serializers.ValidationError("Код подтверждения истёк.")
         
-        # Добавляем объекты в validated_data для использования в view
         data["user"] = confirmation.user
         data["new_email"] = confirmation.target_email
         data["confirmation"] = confirmation
@@ -287,7 +278,6 @@ class ConfirmPasswordChangeSerializer(serializers.Serializer):
         
         Проверяет валидность кода и его срок действия.
         """
-        # Ищем активный код подтверждения смены пароля
         qs = ConfirmationCode.objects.filter(code=data["code"], code_type=ConfirmationCode.PASSWORD_CHANGE)
         if not qs.exists():
             raise serializers.ValidationError("Неверный код подтверждения.")
@@ -296,7 +286,6 @@ class ConfirmPasswordChangeSerializer(serializers.Serializer):
         if confirmation.is_expired():
             raise serializers.ValidationError("Код подтверждения истёк.")
         
-        # Добавляем объекты в validated_data для использования в view
         data["user"] = confirmation.user
         data["new_password"] = confirmation.target_password
         data["confirmation"] = confirmation
@@ -326,3 +315,82 @@ class EmptySerializer(serializers.Serializer):
     Используется для logout и других операций, не требующих входных данных.
     """
     pass
+
+
+class AdminCreateUserSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для создания пользователей администратором.
+    
+    Позволяет администраторам создавать пользователей с указанием роли
+    и статуса активности без подтверждения email.
+    """
+    
+    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+
+    class Meta:
+        model = User
+        fields = ("username", "email", "password", "role", "is_active")
+        extra_kwargs = {
+            "email": {"required": True},
+            "role": {"required": False},
+            "is_active": {"required": False},
+        }
+
+    def validate_email(self, value):
+        """Нормализует email к нижнему регистру."""
+        return value.lower()
+
+    def create(self, validated_data):
+        """Создает пользователя с указанными параметрами."""
+        password = validated_data.pop("password")
+        user = User.objects.create_user(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+
+class AdminUpdateUserSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для обновления пользователей администратором.
+    """
+    
+    password = serializers.CharField(write_only=True, required=False, validators=[validate_password])
+
+    class Meta:
+        model = User
+        fields = ("username", "email", "password", "role", "is_active")
+
+    def validate_email(self, value):
+        """Нормализует email к нижнему регистру."""
+        return value.lower()
+
+    def update(self, instance, validated_data):
+        """Обновляет пользователя."""
+        password = validated_data.pop("password", None)
+        if password:
+            instance.set_password(password)
+        return super().update(instance, validated_data)
+
+
+class BulkUserOperationSerializer(serializers.Serializer):
+    """
+    Сериализатор для массовых операций с пользователями.
+    """
+    
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        min_length=1,
+        help_text="Список ID пользователей"
+    )
+    action = serializers.ChoiceField(
+        choices=["activate", "deactivate", "delete"],
+        help_text="Действие: activate, deactivate, delete"
+    )
+
+    def validate_user_ids(self, value):
+        """Проверяет, что пользователи существуют."""
+        existing_ids = User.objects.filter(id__in=value).values_list('id', flat=True)
+        missing_ids = set(value) - set(existing_ids)
+        if missing_ids:
+            raise serializers.ValidationError(f"Пользователи с ID {missing_ids} не найдены.")
+        return value

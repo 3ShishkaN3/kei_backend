@@ -45,9 +45,7 @@ class User(AbstractUser):
         Приводит email к нижнему регистру для единообразия.
         """
         if not self.username:
-            # Генерируем уникальный username из первых 6 символов UUID
             self.username = f"user{uuid.uuid4().hex[:6]}"
-        # Нормализуем email к нижнему регистру
         self.email = self.email.lower()
         super().save(*args, **kwargs)
 
@@ -89,10 +87,8 @@ class ConfirmationCode(models.Model):
         Если code не задан, генерирует 6-значный случайный код.
         """
         if not self.expires_at:
-            # Код действителен 10 минут по умолчанию
             self.expires_at = timezone.now() + datetime.timedelta(minutes=10)
         if not self.code:
-            # Генерируем 6-значный код с ведущими нулями
             self.code = f"{random.randint(0, 999999):06d}"
         super().save(*args, **kwargs)
 

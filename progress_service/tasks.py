@@ -18,15 +18,12 @@ def grade_free_text_submission(submission_id):
     """
     try:
         with transaction.atomic():
-            # Блокируем запись TestSubmission, чтобы избежать гонки состояний
             submission = TestSubmission.objects.select_for_update().get(pk=submission_id)
 
-            # Проверяем, что это текстовый тест и он еще не оценен
             if submission.test.test_type != 'free-text' or submission.status != 'grading_pending':
                 logger.warning(f"Попытка оценить уже обработанный или неверный submission_id: {submission_id}")
                 return
 
-            # Получаем все необходимые данные
             student_answer_obj = FreeTextSubmissionAnswer.objects.get(submission=submission)
             student_answer = student_answer_obj.answer_text
             
@@ -34,7 +31,6 @@ def grade_free_text_submission(submission_id):
             task_text = test.title # Текст задания
             correct_answer = test.free_text_question.reference_answer # Эталонный ответ
 
-            # Инициализируем и вызываем сервис LLM
             llm_service = LLMGradingService()
             grading_result = llm_service.grade_answer(
                 task_text=task_text,
@@ -42,7 +38,6 @@ def grade_free_text_submission(submission_id):
                 correct_answer=correct_answer
             )
 
-            # 1. Обновляем TestSubmission
             score = grading_result.get('score', 20)
             is_correct = grading_result.get('is_correct', False)
             llm_feedback = grading_result.get('feedback', 'Комментарий отсутствует.')
@@ -52,13 +47,12 @@ def grade_free_text_submission(submission_id):
             submission.status = 'auto_passed' if is_correct else 'auto_failed'
             submission.save()
 
-            # 2. Отправляем событие в Kafka для обновления прогресса
             kafka_data = {
                 'type': 'test_graded',
                 'user_id': submission.student.id,
                 'test_id': test.id,
                 'status': submission.status,
-                'score': score, # Передаем score как есть (100, 50, или 20)
+                'score': score,
                 'section_id': submission.section_item.section.id,
                 'lesson_id': submission.section_item.section.lesson.id,
                 'course_id': submission.section_item.section.lesson.course.id,

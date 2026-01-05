@@ -3,6 +3,8 @@ logs/
 .trash/
 to_migrate/
 .git
+.git/
+.gitignore
 .mypy_cache/
 .vscode/
 .trunk/
@@ -44,3 +46,5 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+
+*.env

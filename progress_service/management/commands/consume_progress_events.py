@@ -29,7 +29,6 @@ class Command(BaseCommand):
         )
         group_id = config("KAFKA_CONSUMER_GROUP", default="progress_consumer")
 
-        # Подключаемся в цикле с реконнектом при ошибках подключения/работы с Kafka
         while True:
             consumer = None
             try:
@@ -87,6 +86,8 @@ class Command(BaseCommand):
                                 self.handle_test_graded(data, user)
                             elif event_type == "material_viewed":
                                 self.handle_material_viewed(data, user)
+                            elif event_type == "term_learned":
+                                self.update_user_progress(user)
                             else:
                                 self.stdout.write(f"Неизвестный тип события: {event_type}")
                     except Exception as e:
@@ -304,10 +305,8 @@ class Command(BaseCommand):
             self.stdout.write(f"TestProgress для теста {test_id} и пользователя {user.username} не найден.")
             return
 
-        # Приводим оценку к Decimal для совместимых арифметических операций
         score_decimal = Decimal(str(score))
         
-        # Явно преобразуем best_score к Decimal, даже если он уже должен быть Decimal
         if test_progress.best_score is not None:
             old_best = Decimal(str(test_progress.best_score))
         else:
@@ -315,7 +314,6 @@ class Command(BaseCommand):
             
         xp_gain = int(score_decimal - old_best) if score_decimal > old_best else 0
 
-        # Обновляем поля TestProgress
         test_progress.last_score = score_decimal
         if test_progress.best_score is None or score_decimal > Decimal(str(test_progress.best_score)):
             test_progress.best_score = score_decimal
@@ -324,13 +322,11 @@ class Command(BaseCommand):
             test_progress.completed_at = timezone.now()
         test_progress.save()
 
-        # Начисляем опыт, если получен прирост
         if xp_gain > 0:
             stats, _ = LearningStats.objects.get_or_create(user=user)
             stats.add_experience(xp_gain)
             self.stdout.write(f"Начислено {xp_gain} XP пользователю {user.username}")
 
-        # Обновляем связанные прогрессы
         self.update_section_progress(user, section_id)
         self.update_lesson_progress(user, lesson_id, course_id)
         completed_lessons = LessonProgress.objects.filter(
@@ -436,7 +432,6 @@ class Command(BaseCommand):
             lesson_progress.completed_at = timezone.now()
         lesson_progress.save()
         
-        # Если урок только что завершился (не был завершен раньше), отправляем событие
         if not was_completed and lesson_progress.completion_percentage >= 100:
             try:
                 kafka_data = {

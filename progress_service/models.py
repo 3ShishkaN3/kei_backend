@@ -282,5 +282,12 @@ class LearningStats(models.Model):
         new_level = self.calculate_level()
         if new_level > self.level:
             self.level = new_level
+            from notification_service.models import Notification
+            Notification.objects.create(
+                user=self.user,
+                title="Новый уровень! ⭐",
+                message=f"Поздравляем! Вы достигли {new_level} уровня!",
+                notification_type='level_up',
+            )
             
         self.save()

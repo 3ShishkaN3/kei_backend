@@ -362,13 +362,16 @@ def migrate_lesson_service(sqlite_conn):
                 else:
                     print(f"Файл изображения не найден: {source_path}")
 
+            current_order = Lesson.objects.filter(course=course).count()
+
             lesson, created = Lesson.objects.update_or_create(
                 id=lesson_data['id'],
                 defaults={
                     'course': course,
                     'title': lesson_data['name'],
                     'cover_image': new_image_db_path,
-                    'created_by': default_author
+                    'created_by': default_author,
+                    'order': lesson_data['id']
                 }
             )
             if created:

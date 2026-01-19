@@ -19,7 +19,26 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
 
-# LLM Grading Service
+ASGI_APPLICATION = 'kei_backend.asgi.application'
+
+REDIS_HOST = config('REDIS_HOST', default='redis')
+REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
+        },
+    },
+}
+
+WEBPUSH_SETTINGS = {
+    "VAPID_PUBLIC_KEY": config("VAPID_PUBLIC_KEY", default=""),
+    "VAPID_PRIVATE_KEY": config("VAPID_PRIVATE_KEY", default=""),
+    "VAPID_ADMIN_EMAIL": config("VAPID_ADMIN_EMAIL", default="admin@keisenpai.com")
+}
+
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
 
@@ -31,6 +50,7 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -57,6 +77,9 @@ INSTALLED_APPS = [
     'calendar_service',
     'achievement_service',
     'bonus_service',
+    'notification_service.apps.NotificationServiceConfig',
+    'channels',
+    'webpush',
     'storages',
 ]
 
@@ -149,26 +172,18 @@ CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_DOMAIN = "localhost"
+
+CSRF_COOKIE_DOMAIN = "keisenpai.com"
+SESSION_COOKIE_SECURE = True
 
 SESSION_COOKIE_SECURE = False
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'sessionid'
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5000',
-    'https://keisenpai.com',
-    'http://100.113.223.9:5000',
-    'http://192.168.1.16:5000',
-]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5000',
-    'https://keisenpai.com',
-    'http://100.113.223.9:5000',
-    'http://192.168.1.16:5000',
-]
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
 
 
 AUTHENTICATION_BACKENDS = [

@@ -24,7 +24,7 @@ class RuleEngine:
             print(f"[DEBUG] Result: {result}")
             return result
         except Exception as e:
-            print(f"Error evaluating achievement {achievement.id}: {e}")
+            print(f"[ERROR] Error evaluating achievement {achievement.id}: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -39,13 +39,26 @@ class RuleEngine:
         :return: List of newly awarded UserAchievement instances
         """
     
-        candidates = Achievement.objects.filter(
-            is_active=True,
-            triggers__contains=[{'type': event_type}] 
-        )
+        print(f"[DEBUG] check_achievements for user {user.id}, event {event_type}")
         
-        existing_ids = UserAchievement.objects.filter(user=user).values_list('achievement_id', flat=True)
-        candidates = candidates.exclude(id__in=existing_ids)
+        all_active = Achievement.objects.filter(is_active=True)
+        candidates = []
+        for a in all_active:
+            for t in a.triggers:
+                if t.get('type') == event_type:
+                    candidates.append(a)
+                    break
+        
+        print(f"[DEBUG] Found {len(candidates)} candidates with trigger {event_type}")
+        
+        existing_uas = UserAchievement.objects.filter(user=user).select_related('achievement')
+        existing_ids = [ua.achievement_id for ua in existing_uas]
+        existing_titles = [ua.achievement.title for ua in existing_uas]
+        
+        print(f"[DEBUG] User {user.username} (ID: {user.id}) already has: {existing_titles}")
+        
+        candidates = [c for c in candidates if c.id not in existing_ids]
+        print(f"[DEBUG] New candidates to evaluate: {[c.title for c in candidates]}")
         
         newly_awarded = []
         
@@ -62,7 +75,7 @@ class RuleEngine:
                 
                 match = True
                 for key, value in params.items():
-                    if value is None: # "Any"
+                    if value in [None, ""]: # "Any"
                         continue
                     ctx_val = context.get(key)
                     if ctx_val is None and 'event' in context:

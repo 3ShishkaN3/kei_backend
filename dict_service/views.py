@@ -19,6 +19,9 @@ from .permissions import (
 from course_service.models import Course
 from lesson_service.models import Lesson
 
+from django.utils import timezone
+from kei_backend.utils import send_to_kafka
+
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
@@ -106,7 +109,7 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
         if not CanViewDictionaryContent().has_object_permission(self.request, self, section):
             self.permission_denied(self.request, message="Нет доступа к этому разделу словаря.")
 
-        queryset = DictionaryEntry.objects.filter(section=section).select_related('lesson') # Добавляем lesson
+        queryset = DictionaryEntry.objects.filter(section=section).select_related('lesson')
 
         if user.is_authenticated:
              queryset = queryset.annotate(
@@ -178,6 +181,15 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
         serializer = UserLearnedEntrySerializer(learned_entry)
         if created:
+            send_to_kafka('progress_events', {
+                'type': 'term_learned',
+                'user_id': user.id,
+                'entry_id': entry.id,
+                'term': entry.term,
+                'section_id': entry.section_id,
+                'course_id': entry.section.course_id,
+                'timestamp': timezone.now().isoformat()
+            })
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -235,7 +247,7 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = DictionaryEntrySerializer
-    permission_classes = [IsAuthenticated] # Доступ проверяется через урок
+    permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter] 
     search_fields = ['term', 'reading', 'translation']

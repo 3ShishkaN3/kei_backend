@@ -148,6 +148,7 @@ class Test(models.Model):
         ('drag-and-drop', 'Перетаскивание элементов (облачка и ячейки)'),
         ('pronunciation', 'Проверка произношения'),
         ('spelling', 'Проверка правописания'),
+        ('ai-conversation', 'AI Разговор (Кайва с сенсеем)'),
     )
     title = models.CharField(max_length=255, verbose_name="Название теста")
     description = models.TextField(blank=True, verbose_name="Описание/Инструкция к тесту")
@@ -316,6 +317,41 @@ class SpellingQuestion(models.Model):
     def __str__(self):
         return f"Вопрос на правописание для теста: {self.test.title}"
 
+class AiConversationQuestion(models.Model):
+    test = models.OneToOneField(
+        Test,
+        on_delete=models.CASCADE,
+        related_name='ai_conversation_question',
+        limit_choices_to={'test_type': 'ai-conversation'},
+        verbose_name="Тест AI Разговор"
+    )
+    background_image = models.ForeignKey(
+        ImageMaterial, 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL,
+        related_name='ai_tests_using_background', 
+        verbose_name="Фон для разговора"
+    )
+    context = models.TextField(verbose_name="Контекст разговора (О чём общаться)")
+    personality = models.TextField(
+        blank=True, 
+        null=True, 
+        verbose_name="Личность/Характер модели (Опишите от себя)"
+    )
+    goodbye_condition = models.TextField(
+        blank=True, 
+        null=True, 
+        verbose_name="Когда прощаться и заканчивать разговор (условие)"
+    )
+
+    class Meta:
+        verbose_name = "Настройка AI разговора"
+        verbose_name_plural = "Настройки AI разговоров"
+
+    def __str__(self):
+        return f"AI Разговор для теста: {self.test.title}"
+
 class TestSubmission(models.Model):
     SUBMISSION_STATUS_CHOICES = (
         ('submitted', 'Отправлено (ожидает автопроверки/отправки на проверку)'),
@@ -432,3 +468,33 @@ class SpellingSubmissionAnswer(models.Model):
     class Meta:
         verbose_name = "Ответ на правописание"
         verbose_name_plural = "Ответы на правописание"
+
+class AiConversationSubmissionAnswer(models.Model):
+    submission = models.OneToOneField(
+        TestSubmission, 
+        on_delete=models.CASCADE, 
+        related_name='ai_conversation_answer',
+        verbose_name="Отправка теста"
+    )
+    transcript = models.JSONField(
+        default=list, 
+        verbose_name="История разговора (JSON)"
+    )
+    overall_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True, 
+        verbose_name="Итоговая оценка (авто)"
+    )
+    evaluation_details = models.JSONField(
+        default=dict, 
+        verbose_name="Детальная оценка (акцент, грамматика и т.д.)"
+    )
+
+    class Meta:
+        verbose_name = "Ответ на AI разговор"
+        verbose_name_plural = "Ответы на AI разговоры"
+
+    def __str__(self):
+        return f"Оценка AI разговора для submission {self.submission_id}"

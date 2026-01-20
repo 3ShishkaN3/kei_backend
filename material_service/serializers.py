@@ -3,9 +3,10 @@ from rest_framework import serializers
 from .models import (
     TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial,
     Test, MCQOption, FreeTextQuestion, WordOrderSentence, MatchingPair, DragDropSubmissionAnswer,
-    PronunciationQuestion, SpellingQuestion,
+    PronunciationQuestion, SpellingQuestion, AiConversationQuestion,
     TestSubmission, MCQSubmissionAnswer, FreeTextSubmissionAnswer, WordOrderSubmissionAnswer,
-    MatchingSubmissionAnswer, PronunciationSubmissionAnswer, SpellingSubmissionAnswer
+    MatchingSubmissionAnswer, PronunciationSubmissionAnswer, SpellingSubmissionAnswer,
+    AiConversationSubmissionAnswer
 )
 
 from django.db import transaction
@@ -182,15 +183,23 @@ class SpellingQuestionSerializer(serializers.ModelSerializer):
         fields = ['id', 'reference_spelling', 'explanation']
         extra_kwargs = {'test': {'read_only': True, 'required': False}}
 
+class AiConversationQuestionSerializer(serializers.ModelSerializer):
+    background_image_details = ImageMaterialSerializer(source='background_image', read_only=True, allow_null=True)
+
+    class Meta:
+        model = AiConversationQuestion
+        fields = ['id', 'background_image', 'background_image_details', 'context', 'personality', 'goodbye_condition']
+        extra_kwargs = {'test': {'read_only': True, 'required': False}}
+
 
 
 class TestSerializer(serializers.ModelSerializer):
     mcq_options = MCQOptionSerializer(many=True, required=False, allow_null=True)
     free_text_question = FreeTextQuestionSerializer(required=False, allow_null=True)
     word_order_sentence = WordOrderSentenceSerializer(required=False, allow_null=True) 
-    drag_drop_slots = MatchingPairSerializer(many=True, required=False, allow_null=True) 
     pronunciation_question = PronunciationQuestionSerializer(required=False, allow_null=True)
     spelling_question = SpellingQuestionSerializer(required=False, allow_null=True)
+    ai_conversation_question = AiConversationQuestionSerializer(required=False, allow_null=True)
 
     attached_image_details = ImageMaterialSerializer(source='attached_image', read_only=True, allow_null=True)
     attached_audio_details = AudioMaterialSerializer(source='attached_audio', read_only=True, allow_null=True)
@@ -216,6 +225,7 @@ class TestSerializer(serializers.ModelSerializer):
             'drag_drop_slots',
             'pronunciation_question', 
             'spelling_question',
+            'ai_conversation_question',
             'attached_image_file', 
             'attached_audio_file',
         ]
@@ -392,6 +402,7 @@ class TestSerializer(serializers.ModelSerializer):
         word_order_data = validated_data.pop('word_order_sentence', None)
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
+        ai_conversation_data = validated_data.pop('ai_conversation_question', None)
 
         image_file = validated_data.pop('attached_image_file', None)
         audio_file = validated_data.pop('attached_audio_file', None)
@@ -415,6 +426,7 @@ class TestSerializer(serializers.ModelSerializer):
         self._handle_nested_one_to_one(test_instance, word_order_data, 'word_order_sentence', WordOrderSentenceSerializer)
         self._handle_nested_one_to_one(test_instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         self._handle_nested_one_to_one(test_instance, spelling_data, 'spelling_question', SpellingQuestionSerializer)
+        self._handle_nested_one_to_one(test_instance, ai_conversation_data, 'ai_conversation_question', AiConversationQuestionSerializer)
 
         return test_instance
 
@@ -426,6 +438,7 @@ class TestSerializer(serializers.ModelSerializer):
         word_order_data = validated_data.pop('word_order_sentence', None)
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
+        ai_conversation_data = validated_data.pop('ai_conversation_question', None)
 
         image_file_from_request = validated_data.pop('attached_image_file', None)
         audio_file_from_request = validated_data.pop('attached_audio_file', None)
@@ -458,6 +471,8 @@ class TestSerializer(serializers.ModelSerializer):
             self._handle_nested_one_to_one(instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         if spelling_data is not None or ('spelling_question' in self.initial_data and self.initial_data.get('spelling_question') is None):
             self._handle_nested_one_to_one(instance, spelling_data, 'spelling_question', SpellingQuestionSerializer)
+        if ai_conversation_data is not None or ('ai_conversation_question' in self.initial_data and self.initial_data.get('ai_conversation_question') is None):
+            self._handle_nested_one_to_one(instance, ai_conversation_data, 'ai_conversation_question', AiConversationQuestionSerializer)
         
         instance.refresh_from_db()
         return instance
@@ -560,6 +575,11 @@ class SpellingSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
         model = SpellingSubmissionAnswer
         fields = ['submitted_image_file']
 
+class AiConversationSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AiConversationSubmissionAnswer
+        fields = ['transcript', 'overall_score', 'evaluation_details']
+
 class TestSubmissionDetailSerializer(serializers.ModelSerializer):
     test_details = TestSerializer(source='test', read_only=True)
     student_details = UserSerializer(source='student', read_only=True)
@@ -570,6 +590,7 @@ class TestSubmissionDetailSerializer(serializers.ModelSerializer):
     drag_drop_answers = DragDropSubmissionAnswerDetailSerializer(many=True, read_only=True)
     pronunciation_answer = PronunciationSubmissionAnswerOutputSerializer(read_only=True)
     spelling_answer = SpellingSubmissionAnswerOutputSerializer(read_only=True)
+    ai_conversation_answer = AiConversationSubmissionAnswerOutputSerializer(read_only=True)
 
     class Meta:
         model = TestSubmission
@@ -577,13 +598,15 @@ class TestSubmissionDetailSerializer(serializers.ModelSerializer):
             'id', 'test', 'test_details', 'student', 'student_details',
             'section_item', 'submitted_at', 'status', 'score', 'feedback',
             'mcq_answers', 'free_text_answer', 'word_order_answer',
-            'drag_drop_answers', 'pronunciation_answer', 'spelling_answer'
+            'drag_drop_answers', 'pronunciation_answer', 'spelling_answer',
+            'ai_conversation_answer'
         ]
         read_only_fields = (
             'id', 'test', 'test_details', 'student', 'student_details',
             'section_item', 'submitted_at', 'status', 'score', 'feedback',
             'mcq_answers', 'free_text_answer', 'word_order_answer',
-            'drag_drop_answers', 'pronunciation_answer', 'spelling_answer'
+            'drag_drop_answers', 'pronunciation_answer', 'spelling_answer',
+            'ai_conversation_answer'
         )
 
 class TestSubmissionListSerializer(serializers.ModelSerializer):

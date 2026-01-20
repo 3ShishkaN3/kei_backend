@@ -63,6 +63,7 @@ class TestViewSet(BaseMaterialViewSet):
         'word_order_sentence_details',
         'pronunciation_question',
         'spelling_question',
+        'ai_conversation_question',
         'attached_image',
         'attached_audio',
         'created_by'
@@ -194,7 +195,7 @@ class TestViewSet(BaseMaterialViewSet):
              )
 
         submission_status = 'submitted'
-        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling']:
+        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
             submission_status = 'grading_pending'
 
         submission_instance = None
@@ -280,7 +281,7 @@ class TestViewSet(BaseMaterialViewSet):
                 if test_type in ['mcq-single', 'mcq-multi', 'word-order', 'drag-and-drop']:
                     self._perform_auto_check(test_instance, answers_data_from_json, submission_instance)
                 
-                if test_type in ['free-text', 'pronunciation', 'spelling']:
+                if test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
                     submission_instance.status = 'grading_pending'
                     submission_instance.save(update_fields=['status'])
 

@@ -200,6 +200,7 @@ class TestSerializer(serializers.ModelSerializer):
     pronunciation_question = PronunciationQuestionSerializer(required=False, allow_null=True)
     spelling_question = SpellingQuestionSerializer(required=False, allow_null=True)
     ai_conversation_question = AiConversationQuestionSerializer(required=False, allow_null=True)
+    drag_drop_slots = MatchingPairSerializer(many=True, required=False, allow_null=True)
 
     attached_image_details = ImageMaterialSerializer(source='attached_image', read_only=True, allow_null=True)
     attached_audio_details = AudioMaterialSerializer(source='attached_audio', read_only=True, allow_null=True)
@@ -404,6 +405,16 @@ class TestSerializer(serializers.ModelSerializer):
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
 
+        request_files = self.context.get('request').FILES if 'request' in self.context else {}
+        ai_bg_file = request_files.get('ai_background_image')
+        if ai_bg_file and ai_conversation_data is not None:
+             created_bg_img = ImageMaterial.objects.create(
+                 title=f"AI BG - {validated_data.get('title', 'Test')}",
+                 image=ai_bg_file,
+                 created_by=self._get_request_user()
+             )
+             ai_conversation_data['background_image'] = created_bg_img.id
+
         image_file = validated_data.pop('attached_image_file', None)
         audio_file = validated_data.pop('attached_audio_file', None)
         
@@ -440,8 +451,28 @@ class TestSerializer(serializers.ModelSerializer):
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
 
+        request_files = self.context.get('request').FILES if 'request' in self.context else {}
+        ai_bg_file = request_files.get('ai_background_image')
+        if ai_bg_file and ai_conversation_data is not None:
+             created_bg_img = ImageMaterial.objects.create(
+                 title=f"AI BG - {validated_data.get('title', instance.title)}",
+                 image=ai_bg_file,
+                 created_by=self._get_request_user()
+             )
+             ai_conversation_data['background_image'] = created_bg_img.id
+
         image_file_from_request = validated_data.pop('attached_image_file', None)
         audio_file_from_request = validated_data.pop('attached_audio_file', None)
+
+        request_files = self.context.get('request').FILES if 'request' in self.context else {}
+        ai_bg_file = request_files.get('ai_background_image')
+        if ai_bg_file and ai_conversation_data is not None:
+             created_bg_img = ImageMaterial.objects.create(
+                 title=f"AI BG - {validated_data.get('title', instance.title)}",
+                 image=ai_bg_file,
+                 created_by=self._get_request_user()
+             )
+             ai_conversation_data['background_image'] = created_bg_img.id
         
         marker = object() 
         requested_image_id_action = validated_data.pop('attached_image', marker) 

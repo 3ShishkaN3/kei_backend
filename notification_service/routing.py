@@ -3,4 +3,5 @@ from . import consumers
 
 websocket_urlpatterns = [
     re_path(r'^api/v1/ws/notifications/$', consumers.NotificationConsumer.as_asgi()),
+    re_path(r'^api/v1/notifications/$', consumers.NotificationConsumer.as_asgi()), # Fallback
 ]

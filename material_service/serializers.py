@@ -413,7 +413,7 @@ class TestSerializer(serializers.ModelSerializer):
                  image=ai_bg_file,
                  created_by=self._get_request_user()
              )
-             ai_conversation_data['background_image'] = created_bg_img.id
+             ai_conversation_data['background_image'] = created_bg_img
 
         image_file = validated_data.pop('attached_image_file', None)
         audio_file = validated_data.pop('attached_audio_file', None)
@@ -464,15 +464,7 @@ class TestSerializer(serializers.ModelSerializer):
         image_file_from_request = validated_data.pop('attached_image_file', None)
         audio_file_from_request = validated_data.pop('attached_audio_file', None)
 
-        request_files = self.context.get('request').FILES if 'request' in self.context else {}
-        ai_bg_file = request_files.get('ai_background_image')
-        if ai_bg_file and ai_conversation_data is not None:
-             created_bg_img = ImageMaterial.objects.create(
-                 title=f"AI BG - {validated_data.get('title', instance.title)}",
-                 image=ai_bg_file,
-                 created_by=self._get_request_user()
-             )
-             ai_conversation_data['background_image'] = created_bg_img.id
+
         
         marker = object() 
         requested_image_id_action = validated_data.pop('attached_image', marker) 

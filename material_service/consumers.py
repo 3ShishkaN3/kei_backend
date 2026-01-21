@@ -50,6 +50,8 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         self.not_ready_notified = False
         self.start_requested = False
         self.intro_sent = False
+        self.current_ai_text = ""
+        self.translation_task = None
         
         personality = self.question_config.personality or "Кей-сенпай"
         context = self.question_config.context
@@ -80,7 +82,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             ssl_context.verify_mode = ssl.CERT_NONE
             
             self.gemini_ws = await self.gemini_session.ws_connect(GEMINI_WS_URL, ssl=ssl_context)
-            logger.info("WS Connected! Sending setup...")
+            logger.info("WS Connected. Sending setup...")
             
             setup_msg = {
                 "setup": {
@@ -241,16 +243,54 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                         }))
                     text = part.get("text")
                     if text:
+                        text_lower = text.lower()
+                        reflection_keywords = [
+                            "focusing on", "i've crafted", "i'm integrating", "the goal is",
+                            "aiming for", "sticking to", "maintaining", "solidify",
+                            "beginner-friendly", "contextually relevant", "i've", "i'm",
+                            "crafting", "integrating", "focusing", "initiating",
+                            "i am now", "my plan is", "my greeting"
+                        ]
+                        is_reflection = any(keyword in text_lower for keyword in reflection_keywords)
+                        
+                        if is_reflection or text.strip().startswith("**"):
+                            logger.debug(f"Пропущено внутреннее размышление модели: {text[:100]}")
+                            continue
+                        
+                        has_japanese = any(
+                            '\u3040' <= char <= '\u309F' or  # Хирагана
+                            '\u30A0' <= char <= '\u30FF' or  # Катакана
+                            '\u4E00' <= char <= '\u9FAF'      # Кандзи
+                            for char in text
+                        )
+                        
+                        if len(text) > 20 and not has_japanese and text.isascii():
+                            logger.debug(f"Пропущен текст без японских символов (вероятно размышление): {text[:100]}")
+                            continue
+                        
                         if self.conversation_history and self.conversation_history[-1]["role"] == "assistant":
                             self.conversation_history[-1]["content"] += text
                         else:
                             self.conversation_history.append({"role": "assistant", "content": text})
+                        
                         await self.send(text_data=json.dumps({
                             'type': 'ai_text_chunk',
                             'text': text
                         }))
+                        
+                        self.current_ai_text += text
+                        
+                        if len(self.current_ai_text) > 50:
+                            text_to_translate = self.current_ai_text
+                            self.current_ai_text = ""
+                            asyncio.create_task(self._send_translation_async(text_to_translate))
 
             if server_content.get("turnComplete"):
+                if self.current_ai_text:
+                    text_to_translate = self.current_ai_text
+                    self.current_ai_text = ""
+                    asyncio.create_task(self._send_translation_async(text_to_translate))
+                
                 await self.send(text_data=json.dumps({
                     'type': 'turn_complete'
                 }))
@@ -258,10 +298,27 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         if "outputTranscription" in data:
             transcript = data["outputTranscription"].get("text")
             if transcript:
-                await self.send(text_data=json.dumps({
-                    'type': 'ai_text_chunk',
-                    'text': transcript
-                }))
+                text_lower = transcript.lower()
+                reflection_keywords = [
+                    "focusing on", "i've crafted", "i'm integrating", "the goal is",
+                    "aiming for", "sticking to", "maintaining", "solidify",
+                    "beginner-friendly", "contextually relevant", "initiating",
+                    "crafting", "integrating", "focusing", "i am now", "my plan is"
+                ]
+                is_reflection = any(keyword in text_lower for keyword in reflection_keywords) or transcript.strip().startswith("**")
+                
+                if not is_reflection:
+                    await self.send(text_data=json.dumps({
+                        'type': 'ai_text_chunk',
+                        'text': transcript
+                    }))
+                    self.current_ai_text += transcript
+                    if len(self.current_ai_text) > 50:
+                        text_to_translate = self.current_ai_text
+                        self.current_ai_text = ""
+                        asyncio.create_task(self._send_translation_async(text_to_translate))
+                else:
+                    logger.debug(f"Пропущена транскрипция (размышление): {transcript[:100]}")
 
         if "inputTranscription" in data:
             transcript = data["inputTranscription"].get("text")
@@ -270,6 +327,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                     'type': 'user_text_transcript',
                     'text': transcript
                 }))
+                asyncio.create_task(self._translate_user_speech_async(transcript))
 
     async def _maybe_send_intro(self):
         if self.intro_sent or not self.start_requested:
@@ -298,13 +356,85 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             return False
 
     async def get_translation(self, text):
+        """Переводит японский текст на русский через gemini-2.0-flash"""
         try:
-            model = genai.GenerativeModel('models/gemini-2.5-flash')
-            prompt = f"Переведи этот японский текст на русский язык для субтитров: {text}"
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            prompt = f"""Ты переводчик. Переведи этот японский текст на русский язык для субтитров.
+
+ВАЖНО: 
+- Переведи ТОЛЬКО на русский язык, НЕ на английский
+- Переведи естественно и разговорно
+- Сохрани смысл и тон
+
+Японский текст: {text}
+
+Перевод на русский:"""
             response = await model.generate_content_async(prompt)
-            return response.text.strip()
-        except:
-            return "..."
+            translated = response.text.strip()
+            if translated.lower().startswith("перевод:"):
+                translated = translated[8:].strip()
+            elif translated.lower().startswith("translation:"):
+                translated = translated[12:].strip()
+            return translated
+        except Exception as e:
+            logger.warning(f"Translation error: {e}")
+            return text
+    
+    async def translate_text_async(self, text):
+        """Асинхронный перевод текста, не блокирующий основной поток"""
+        if not text or len(text.strip()) < 2:
+            return text
+        
+        try:
+            translated = await self.get_translation(text)
+            return translated
+        except Exception as e:
+            logger.warning(f"Async translation error: {e}")
+            return text
+    
+    async def _send_translation_async(self, text):
+        """Отправляет перевод текста клиенту асинхронно"""
+        try:
+            translated = await self.translate_text_async(text)
+            await self.send(text_data=json.dumps({
+                'type': 'ai_text_translated',
+                'text': text,
+                'translated': translated
+            }))
+        except Exception as e:
+            logger.error(f"Error sending translation: {e}")
+    
+    async def _translate_user_speech_async(self, text):
+        """Переводит речь ученика через gemini-2.5-flash-lite"""
+        try:
+            if not text or len(text.strip()) < 2:
+                return
+            
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            prompt = f"""Ты переводчик. Переведи этот японский текст на русский язык для субтитров.
+
+ВАЖНО: 
+- Переведи ТОЛЬКО на русский язык, НЕ на английский
+- Переведи естественно и разговорно
+- Сохрани смысл и тон
+
+Японский текст: {text}
+
+Перевод на русский:"""
+            response = await model.generate_content_async(prompt)
+            translated = response.text.strip()
+            if translated.lower().startswith("перевод:"):
+                translated = translated[8:].strip()
+            elif translated.lower().startswith("translation:"):
+                translated = translated[12:].strip()
+            
+            await self.send(text_data=json.dumps({
+                'type': 'user_text_translated',
+                'text': text,
+                'translated': translated
+            }))
+        except Exception as e:
+            logger.warning(f"Error translating user speech: {e}")
 
     @database_sync_to_async
     def get_test(self, test_id):

@@ -47,6 +47,10 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         self.receiver_task = None
         self.gemini_ready = False
         
+        # Для сборки инкрементальной транскрипции
+        self.user_transcript_buffer = ""
+        self.ai_transcript_buffer = ""
+        
         self.intro_sent = False
         self.start_requested = False
         
@@ -89,10 +93,12 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                         "responseModalities": ["AUDIO"], # Модель отвечает аудио
                         "speechConfig": {
                             "voiceConfig": {
-                                "prebuiltVoiceConfig": {"voiceName": "Aoede"} # Голос (Kore, Aoede, etc)
+                                "prebuiltVoiceConfig": {"voiceName": "Kore"} # Голос (Kore, Aoede, etc)
                             }
                         }
-                    }
+                    },
+                    "input_audio_transcription": {},
+                    "output_audio_transcription": {}
                 }
             } # Что за хуйня вообще эта структура? Никто не объяснил
             await self.gemini_ws.send_json(setup_msg)
@@ -135,60 +141,108 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
     async def _handle_gemini_message(self, data):
         """Разбор сообщения от Gemini и отправка на фронтенд"""
         if not data: return
+        
+        # Показываем только важные сообщения
+        if "serverContent" in data:
+            server_content = data["serverContent"]
+            # Пропускаем сообщения только с аудио
+            if not any(key in server_content for key in ["input_audio_transcription", "output_audio_transcription", "inputTranscription", "outputTranscription", "turnComplete", "generationComplete"]):
+                # Отправляем аудио но не логируем
+                model_turn = server_content.get("modelTurn")
+                if model_turn:
+                    parts = model_turn.get("parts", [])
+                    for part in parts:
+                        if "inlineData" in part:
+                            await self.send(text_data=json.dumps({
+                                'type': 'audio_chunk',
+                                'data': part["inlineData"].get("data")
+                            }))
+                return
 
         if "setupComplete" in data:
             self.gemini_ready = True
             await self.send(text_data=json.dumps({'type': 'ready'}))
             await self._maybe_send_intro()
-            return
 
         server_content = data.get("serverContent")
         
         if server_content:
-            model_turn = server_content.get("modelTurn")
-            if model_turn:
-                parts = model_turn.get("parts", [])
-                for part in parts:
-                    if "inlineData" in part:
-                        await self.send(text_data=json.dumps({
-                            'type': 'audio_chunk',
-                            'data': part["inlineData"].get("data")
-                        }))
+            # Проверяем все возможные поля транскрипции
+            transcription_fields = [
+                "input_transcription", 
+                "output_transcription", 
+                "inputTranscription", 
+                "outputTranscription"
+            ]
+            
+            for field in transcription_fields:
+                if field in server_content:
+                    if field in ["input_transcription", "inputTranscription"]:
+                        # Транскрипция пользователя
+                        transcript_data = server_content[field]
+                        user_text = transcript_data.get("text", "").strip() if isinstance(transcript_data, dict) else str(transcript_data).strip()
+                        
+                        if user_text:
+                            self.user_transcript_buffer += user_text
+                            
+                            await self.send(text_data=json.dumps({
+                                'type': 'user_text_transcript',
+                                'text': self.user_transcript_buffer,
+                                'is_final': False
+                            }))
+                    
+                    elif field in ["output_transcription", "outputTranscription"]:
+                        # Транскрипция AI
+                        transcript_data = server_content[field]
+                        ai_text = transcript_data.get("text", "").strip() if isinstance(transcript_data, dict) else str(transcript_data).strip()
+                        
+                        if ai_text:
+                            self.ai_transcript_buffer += ai_text
+                            
+                            await self.send(text_data=json.dumps({
+                                'type': 'ai_text_chunk',
+                                'text': self.ai_transcript_buffer,
+                                'is_final': False
+                            }))
 
             if server_content.get("turnComplete"):
-                await self.send(text_data=json.dumps({'type': 'turn_complete'}))
+                # Завершаем транскрипцию пользователя
+                if self.user_transcript_buffer.strip():
+                    final_user_text = self.user_transcript_buffer.strip()
+                    if len(final_user_text) > 1:
+                        self._append_history("user", final_user_text)
+                    
+                    self.user_transcript_buffer = ""
+                
+                # Завершаем транскрипцию AI
+                if self.ai_transcript_buffer.strip():
+                    final_ai_text = self.ai_transcript_buffer.strip()
+                    self._append_history("assistant", final_ai_text)
+                    
+                    self.ai_transcript_buffer = ""
 
+        # Проверяем транскрипцию на верхнем уровне
         if "outputTranscription" in data:
-            # Текст на японском
             ai_text = data["outputTranscription"].strip()
             if ai_text:
-                self._append_history("assistant", ai_text)
-
+                self.ai_transcript_buffer += ai_text
                 await self.send(text_data=json.dumps({
                     'type': 'ai_text_chunk',
-                    'text': ai_text
+                    'text': self.ai_transcript_buffer,
+                    'is_final': False
                 }))
-                
-                asyncio.create_task(self._translate_and_send(ai_text, "ai"))
 
         if "inputTranscription" in data:
             it = data["inputTranscription"]
-            user_text = it.get("text", "") if isinstance(it, dict) else it
+            user_text = it.get("text", "").strip() if isinstance(it, dict) else str(it).strip()
             
-            is_final = True 
-            if isinstance(it, dict):
-                pass
-
             if user_text:
+                self.user_transcript_buffer += user_text
                 await self.send(text_data=json.dumps({
                     'type': 'user_text_transcript',
-                    'text': user_text,
-                    'is_final': True
+                    'text': self.user_transcript_buffer,
+                    'is_final': False
                 }))
-                
-                if len(user_text.strip()) > 1:
-                    self._append_history("user", user_text)
-                    asyncio.create_task(self._translate_and_send(user_text, "user"))
 
     async def _translate_and_send(self, text, source_type):
         """
@@ -241,6 +295,11 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                 self.start_requested = True
                 await self._maybe_send_intro()
             
+            elif action == 'translate':
+                text_to_translate = data.get('text')
+                if text_to_translate:
+                    asyncio.create_task(self._translate_and_send(text_to_translate, data.get('source_type', 'user')))
+
             elif action == 'submit_for_evaluation':
                 await self._handle_submission()
 
@@ -262,7 +321,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                 try:
                     import base64
                     # Gemini требует base64 в JSON, даже если socket поддерживает binary
-                    # Google - корпорация зла
                     b64_data = base64.b64encode(bytes_data).decode('utf-8')
                     await self.gemini_ws.send_json({
                         "realtimeInput": {
@@ -271,8 +329,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                                 "mimeType": "audio/pcm;rate=16000"
                             }]
                         }
-                    }) # Нет, я серьёзно. Они даже не могут внятную документацию написать
-                    # И это только начало
+                    })
                 except Exception as e:
                     logger.error(f"Error sending audio: {e}")
 

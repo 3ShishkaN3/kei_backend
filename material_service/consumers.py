@@ -65,12 +65,34 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         КОНТЕКСТ РАЗГОВОРА: {context}
         КОНЕЦ ДИАЛОГА: {goodbye}
         
-        У тебя есть доступ к инструменту evaluate_conversation для оценки диалога.
-        Когда пользователь завершит разговор, используй этот инструмент для детальной оценки.
+        КРИТИЧЕСКИ ВАЖНО: У тебя есть доступ к инструменту evaluate_conversation для оценки диалога.
         
-        ВНИМАНИЕ: При вызове evaluate_conversation обязательно включи в conversation_history 
-        полную историю разговора в формате JSON строки, а в context - контекст задания.
-        Инструмент вернет детальную оценку по критериям, которую нужно сохранить.
+        КОГДА ОЦЕНИВАТЬ:
+        - Когда разговор завершен (выполнено условие: {goodbye})
+        - СРАЗУ после завершения разговора автоматически вызови evaluate_conversation
+        - НЕ жди дополнительных команд от пользователя
+        
+        ЧТО ОЦЕНИВАТЬ:
+        - Оценивай ТОЛЬКО на основе АУДИО данных, которые ты получаешь в реальном времени
+        - НЕ оценивай транскрипцию текста - она может содержать ошибки распознавания
+        - Оценивай произношение, интонацию, беглость речи на основе АУДИО
+        - Оценивай грамматику и лексику на основе того, что ты СЛЫШИШЬ в аудио
+        - Транскрипция используется только для понимания содержания, но оценка должна быть по АУДИО
+        
+        ВНИМАНИЕ: При вызове evaluate_conversation ты должна передать ОБЯЗАТЕЛЬНО все параметры:
+        - grammar_score (0-100) - оценка грамматики на основе услышанного аудио
+        - vocabulary_score (0-100) - оценка лексики на основе услышанного аудио
+        - fluency_score (0-100) - оценка беглости речи на основе аудио (паузы, темп)
+        - pronunciation_score (0-100) - оценка произношения ТОЛЬКО на основе аудио (интонация, акценты, четкость)
+        - relevance_score (0-100) - оценка релевантности ответов контексту
+        - conversation_flow (0-100) - оценка течения разговора
+        - strengths - массив сильных сторон (минимум 2 пункта)
+        - weaknesses - массив слабых сторон (минимум 2 пункта)
+        - recommendations - массив рекомендаций (минимум 2 пункта)
+        - detailed_feedback - подробный отзыв на русском языке
+        
+        ВСЕ параметры обязательны для заполнения!
+        После вызова evaluate_conversation разговор завершен.
         """
         
         await self.accept()
@@ -81,7 +103,9 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         try:
             logger.info(f"Connecting to Gemini: {GEMINI_WS_URL}")
             
-            timeout = aiohttp.ClientTimeout(total=60)
+            timeout = aiohttp.ClientTimeout(total=3600) # Короче, тут нужно установить timeout на 1 час, иначе модель будет отключаться
+            # А чё она отключается? Я хуй знает.
+            # Наверное, потому что модель не успевает обработать все данные за 1 минуту.    
             self.gemini_session = aiohttp.ClientSession(timeout=timeout)
             
             ssl_context = ssl.create_default_context()
@@ -111,27 +135,29 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                             "functionDeclarations": [
                                 {
                                     "name": "evaluate_conversation",
-                                    "description": "Оценивает разговор пользователя по японскому языку",
+                                    "description": "Оценивает разговор ученика с сенсеем по японскому языку на основе АУДИО данных, полученных во время диалога. КРИТИЧЕСКИ ВАЖНО: Оценивай произношение, интонацию, беглость речи на основе АУДИО, которое ты получала в реальном времени, а не только по транскрипции текста. Транскрипция может содержать ошибки распознавания речи.",
                                     "parameters": {
                                         "type": "object",
                                         "properties": {
-                                            "conversation_history": {
-                                                "type": "string",
-                                                "description": "Полная история разговора в текстовом формате"
-                                            },
-                                            "context": {
-                                                "type": "string", 
-                                                "description": "Контекст задания"
-                                            }
+                                            "grammar_score": {"type": "integer", "description": "Оценка грамматики (0-100) на основе услышанного аудио"},
+                                            "vocabulary_score": {"type": "integer", "description": "Оценка лексики (0-100) на основе услышанного аудио"},
+                                            "fluency_score": {"type": "integer", "description": "Оценка беглости речи (0-100) на основе аудио - темп, паузы, естественность"},
+                                            "pronunciation_score": {"type": "integer", "description": "Оценка произношения (0-100) ТОЛЬКО на основе аудио - интонация, акценты, четкость произношения"},
+                                            "relevance_score": {"type": "integer", "description": "Оценка релевантности (0-100) - соответствие ответов контексту разговора"},
+                                            "conversation_flow": {"type": "integer", "description": "Оценка течения разговора (0-100) - умение поддерживать диалог"},
+                                            "strengths": {"type": "array", "items": {"type": "string"}, "description": "Сильные стороны ученика (минимум 2 пункта)"},
+                                            "weaknesses": {"type": "array", "items": {"type": "string"}, "description": "Слабые стороны ученика (минимум 2 пункта)"},
+                                            "recommendations": {"type": "array", "items": {"type": "string"}, "description": "Рекомендации ученику (минимум 2 пункта)"},
+                                            "detailed_feedback": {"type": "string", "description": "Подробный отзыв на русском языке"}
                                         },
-                                        "required": ["conversation_history", "context"]
+                                        "required": ["grammar_score", "vocabulary_score", "fluency_score", "pronunciation_score", "relevance_score", "conversation_flow", "strengths", "weaknesses", "recommendations", "detailed_feedback"]
                                     }
                                 }
                             ]
                         }
                     ]
                 }
-            } # Что за хуйня вообще эта структура? Никто не объяснил
+            } # Конец setup_msg
             await self.gemini_ws.send_json(setup_msg)
             
             self.receiver_task = asyncio.create_task(self.receive_from_gemini())
@@ -179,7 +205,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         if "toolCall" in data:
             logger.info("Found toolCall at top level")
             function_call = data["toolCall"]
-            logger.info(f"Found 1 function call")
             await self._handle_function_call(function_call)
             return
         
@@ -211,7 +236,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             # Проверяем tool calls (Gemini может присылать 'toolCall' или 'functionCalls')
             function_calls = server_content.get("functionCalls") or server_content.get("toolCall")
             if function_calls:
-                logger.info(f"Found {len(function_calls) if isinstance(function_calls, list) else 1} function calls in serverContent")
+                logger.info(f"Found function calls in serverContent")
                 # Если это один tool call, оборачиваем в список
                 if not isinstance(function_calls, list):
                     function_calls = [function_calls]
@@ -388,19 +413,19 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
 
     async def _handle_function_call(self, function_call):
         """Обработка вызовов функций от Gemini"""
-        logger.info(f"Received function call: {function_call}")
+        function_name = function_call.get('name')
+        args = function_call.get('args', {})
         
         # Если function_call содержит functionCalls, извлекаем первый
         if 'functionCalls' in function_call:
             function_calls = function_call['functionCalls']
             if function_calls and len(function_calls) > 0:
                 function_call = function_calls[0]
-        
-        function_name = function_call.get('name')
-        args = function_call.get('args', {})
+                function_name = function_call.get('name')
+                args = function_call.get('args', {})
         
         if function_name == 'evaluate_conversation':
-            logger.info("Processing evaluate_conversation tool call")
+            logger.info("Handling evaluate_conversation tool call")
             await self._handle_evaluation_tool_call(args)
         else:
             logger.warning(f"Unknown function call: {function_name}")
@@ -408,11 +433,24 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
     async def _handle_evaluation_tool_call(self, args):
         """Обработка tool call для оценки разговора"""
         try:
-            conversation_history = args.get('conversation_history', '')
-            context = args.get('context', '')
+            # Получаем все параметры оценки из tool call
+            grammar_score = args.get('grammar_score', 0)
+            vocabulary_score = args.get('vocabulary_score', 0)
+            fluency_score = args.get('fluency_score', 0)
+            pronunciation_score = args.get('pronunciation_score', 0)
+            relevance_score = args.get('relevance_score', 0)
+            conversation_flow = args.get('conversation_flow', 0)
+            strengths = args.get('strengths', [])
+            weaknesses = args.get('weaknesses', [])
+            recommendations = args.get('recommendations', [])
+            detailed_feedback = args.get('detailed_feedback', '')
             
             # Сохраняем результаты оценки
-            submission = await self._save_evaluation_from_tool(conversation_history, context)
+            submission = await self._save_evaluation_from_tool(
+                grammar_score, vocabulary_score, fluency_score, pronunciation_score,
+                relevance_score, conversation_flow, strengths, weaknesses, 
+                recommendations, detailed_feedback
+            )
             
             if submission:
                 submission_payload = {
@@ -425,6 +463,11 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                     'type': 'submission_update',
                     'submission': submission_payload
                 }))
+                
+                # Закрываем WebSocket после успешной оценки
+                logger.info("Evaluation complete, closing WebSocket connection")
+                await asyncio.sleep(0.5)  # Небольшая задержка для отправки сообщения
+                await self._close_connections()
             else:
                 await self.send(text_data=json.dumps({
                     'type': 'submission_error',
@@ -439,7 +482,8 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             }))
 
     @database_sync_to_async
-    def _save_evaluation_from_tool(self, conversation_history, context):
+    def _save_evaluation_from_tool(self, grammar_score, vocabulary_score, fluency_score, pronunciation_score,
+                                    relevance_score, conversation_flow, strengths, weaknesses, recommendations, detailed_feedback):
         """Сохранение результатов оценки из tool call"""
         section_item = SectionItem.objects.filter(object_id=self.test.id, content_type__model='test').first()
         student = self.user if self.user and not self.user.is_anonymous else None
@@ -452,58 +496,29 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             submitted_at=timezone.now()
         )
         
-        # Парсим conversation_history из JSON строки в массив
-        try:
-            if isinstance(conversation_history, str):
-                # Если это JSON строка, парсим ее
-                parsed_history = json.loads(conversation_history)
-            else:
-                # Если это уже объект, используем его
-                parsed_history = conversation_history
-        except:
-            # Если не удалось распарсить, используем историю из consumer
-            parsed_history = self.conversation_history
+        # Используем историю разговора из consumer
+        parsed_history = self.conversation_history
         
-        # Пытаемся извлечь оценку из ответа tool call
-        evaluation_data = {}
-        overall_score = 0
-        feedback = "Оценка выполнена через tool call"
+        # Создаем evaluation_data из параметров tool call
+        evaluation_data = {
+            'grammar_score': grammar_score,
+            'vocabulary_score': vocabulary_score,
+            'fluency_score': fluency_score,
+            'pronunciation_score': pronunciation_score,
+            'relevance_score': relevance_score,
+            'conversation_flow': conversation_flow,
+            'strengths': strengths,
+            'weaknesses': weaknesses,
+            'recommendations': recommendations,
+            'detailed_feedback': detailed_feedback
+        }
         
-        # Для tool call от Gemini мы не ищем JSON в conversation_history
-        # Вместо этого мы создаем базовую оценку на основе полученных данных
-        try:
-            # Создаем базовую оценку для tool call
-            evaluation_data = {
-                'grammar_score': 75,  # Базовая оценка
-                'vocabulary_score': 75,
-                'fluency_score': 75,
-                'pronunciation_score': 75,
-                'relevance_score': 75,
-                'conversation_flow': 75,
-                'strengths': ['Участие в диалоге', 'Понимание контекста', 'Использование японского языка'],
-                'weaknesses': ['Требуется больше практики', 'Ограниченный словарный запас'],
-                'recommendations': ['Практиковать грамматику ませんか、ましょう', 'Расширить словарный запас по теме еда'],
-                'detailed_feedback': f'Диалог по теме "{context}" был проведен успешно. Ученик проявил понимание базовых конструкций японского языка.'
-            }
-            
-            # Вычисляем общую оценку как среднее всех критериев
-            scores = [
-                evaluation_data.get('grammar_score', 0),
-                evaluation_data.get('vocabulary_score', 0),
-                evaluation_data.get('fluency_score', 0),
-                evaluation_data.get('pronunciation_score', 0),
-                evaluation_data.get('relevance_score', 0),
-                evaluation_data.get('conversation_flow', 0)
-            ]
-            overall_score = sum(scores) / len(scores) if scores else 0
-            
-            # Формируем краткий отзыв из подробного
-            detailed_feedback = evaluation_data.get('detailed_feedback', feedback)
-            feedback = detailed_feedback[:200] + '...' if len(detailed_feedback) > 200 else detailed_feedback
-            
-        except Exception as e:
-            logger.error(f"Failed to create evaluation from tool call: {e}")
-            evaluation_data = {'error': str(e)}
+        # Вычисляем общую оценку как среднее всех критериев
+        scores = [
+            grammar_score, vocabulary_score, fluency_score, 
+            pronunciation_score, relevance_score, conversation_flow
+        ]
+        overall_score = sum(scores) / len(scores) if scores else 0
         
         # Создаем запись с ответом от tool call
         AiConversationSubmissionAnswer.objects.create(
@@ -514,39 +529,24 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         )
         
         submission.score = overall_score
-        submission.feedback = feedback
+        submission.feedback = detailed_feedback
         submission.status = 'graded'
         submission.save()
         return submission
 
     async def _handle_submission(self):
-        """Оценка диалога и сохранение результатов через tool call"""
-        logger.info("Starting evaluation via tool call")
+        """Оценка диалога - отправляем запрос модели"""
+        logger.info("Received submit_for_evaluation action")
         await self.send(text_data=json.dumps({
             'type': 'submission_status',
             'status': 'grading_pending'
         }))
         
-        # Формируем историю разговора для tool call
-        full_transcript_str = ""
-        for turn in self.conversation_history:
-            role = "Сенсей" if turn['role'] == 'assistant' else "Ученик"
-            full_transcript_str += f"{role}: {turn['content']}\n"
-        
-        logger.info(f"Conversation history length: {len(self.conversation_history)}")
-        
-        # Отправляем запрос модели использовать tool для оценки
         evaluation_prompt = f"""
-        Пожалуйста, оцени этот разговор используя инструмент evaluate_conversation.
-        
-        История разговора:
-        {full_transcript_str}
-        
+        РАЗГОВОР ЗАВЕРШЕН. Вызови инструмент evaluate_conversation для оценки диалога.
+        Оценивай на основе АУДИО данных, которые ты получала во время разговора, а не только по транскрипции.
         Контекст задания: {self.question_config.context}
         """
-        
-        logger.info("Sending evaluation prompt to Gemini")
-        logger.info(f"Gemini WS state before sending: closed={self.gemini_ws.closed if self.gemini_ws else 'None'}")
         
         if self.gemini_ws and not self.gemini_ws.closed:
             try:
@@ -556,21 +556,11 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                         "turnComplete": True
                     }
                 })
-                logger.info("Evaluation prompt sent successfully")
-                
-                # Ждем ответа от Gemini с таймаутом
-                for i in range(30):  # 30 секунд таймаут
-                    await asyncio.sleep(1)
-                    if self.gemini_ws.closed:
-                        logger.error("Gemini WebSocket closed after sending prompt")
-                        break
-                    if not self.gemini_ws.closed:
-                        logger.info(f"Waiting for response... {i+1}s")
-                        
+                logger.info("Evaluation request sent")
             except Exception as e:
-                logger.error(f"Error sending evaluation prompt: {e}")
+                logger.error(f"Error sending evaluation request: {e}")
         else:
-            logger.error("Gemini WebSocket is closed, cannot send evaluation prompt")
+            logger.error("Gemini WebSocket is closed")
 
     @database_sync_to_async
     def save_submission(self):
@@ -710,13 +700,18 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         else:
             self.conversation_history.append({"role": role, "content": content})
 
-    async def disconnect(self, close_code):
+    async def _close_connections(self):
+        """Закрывает соединения с Gemini"""
         if self.receiver_task:
             self.receiver_task.cancel()
-        if self.gemini_ws:
+        if self.gemini_ws and not self.gemini_ws.closed:
             await self.gemini_ws.close()
         if self.gemini_session:
             await self.gemini_session.close()
+        logger.info("Gemini connections closed")
+
+    async def disconnect(self, close_code):
+        await self._close_connections()
         logger.info(f"AI Conversation Disconnected: {close_code}")
 
     @database_sync_to_async

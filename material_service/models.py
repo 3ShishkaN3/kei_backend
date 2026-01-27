@@ -498,3 +498,83 @@ class AiConversationSubmissionAnswer(models.Model):
 
     def __str__(self):
         return f"Оценка AI разговора для submission {self.submission_id}"
+
+# JSON schema for evaluation_details
+AI_CONVERSATION_EVALUATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "grammar_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка грамматики (0-100)"
+        },
+        "vocabulary_score": {
+            "type": "number", 
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка лексики (0-100)"
+        },
+        "fluency_score": {
+            "type": "number",
+            "minimum": 0, 
+            "maximum": 100,
+            "description": "Оценка беглости речи (0-100)"
+        },
+        "pronunciation_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100, 
+            "description": "Оценка произношения (0-100)"
+        },
+        "relevance_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка релевантности ответов (0-100)"
+        },
+        "conversation_flow": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка течения разговора (0-100)"
+        },
+        "strengths": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Сильные стороны ученика"
+        },
+        "weaknesses": {
+            "type": "array", 
+            "items": {
+                "type": "string"
+            },
+            "description": "Слабые стороны ученика"
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Рекомендации по улучшению"
+        },
+        "detailed_feedback": {
+            "type": "string",
+            "description": "Подробный отзыв на русском языке"
+        }
+    },
+    "required": [
+        "grammar_score",
+        "vocabulary_score", 
+        "fluency_score",
+        "pronunciation_score",
+        "relevance_score",
+        "conversation_flow",
+        "strengths",
+        "weaknesses",
+        "recommendations",
+        "detailed_feedback"
+    ]
+}

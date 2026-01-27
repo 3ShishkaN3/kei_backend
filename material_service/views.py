@@ -360,7 +360,6 @@ class TestViewSet(BaseMaterialViewSet):
             response = model.generate_content(prompt)
             translated_text = response.text.strip()
             
-            # Удаляем кавычки если они есть
             translated_text = translated_text.strip('"\'')
             
             return Response({

@@ -41,13 +41,12 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
-        self.conversation_history = [] # Полная история для оценки
+        self.conversation_history = []
         self.gemini_ws = None
         self.gemini_session = None
         self.receiver_task = None
         self.gemini_ready = False
         
-        # Для сборки инкрементальной транскрипции
         self.user_transcript_buffer = ""
         self.ai_transcript_buffer = ""
         
@@ -201,19 +200,15 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         
         logger.info(f"Received Gemini message: {list(data.keys())}")
         
-        # Проверяем toolCall на верхнем уровне
         if "toolCall" in data:
             logger.info("Found toolCall at top level")
             function_call = data["toolCall"]
             await self._handle_function_call(function_call)
             return
         
-        # Показываем только важные сообщения
         if "serverContent" in data:
             server_content = data["serverContent"]
-            # Пропускаем сообщения только с аудио
             if not any(key in server_content for key in ["input_audio_transcription", "output_audio_transcription", "inputTranscription", "outputTranscription", "turnComplete", "generationComplete"]):
-                # Отправляем аудио но не логируем
                 model_turn = server_content.get("modelTurn")
                 if model_turn:
                     parts = model_turn.get("parts", [])
@@ -233,18 +228,15 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         server_content = data.get("serverContent")
         
         if server_content:
-            # Проверяем tool calls (Gemini может присылать 'toolCall' или 'functionCalls')
             function_calls = server_content.get("functionCalls") or server_content.get("toolCall")
             if function_calls:
                 logger.info(f"Found function calls in serverContent")
-                # Если это один tool call, оборачиваем в список
                 if not isinstance(function_calls, list):
                     function_calls = [function_calls]
                 for function_call in function_calls:
                     await self._handle_function_call(function_call)
                 return
             
-            # Проверяем все возможные поля транскрипции
             transcription_fields = [
                 "input_transcription", 
                 "output_transcription", 
@@ -255,7 +247,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             for field in transcription_fields:
                 if field in server_content:
                     if field in ["input_transcription", "inputTranscription"]:
-                        # Транскрипция пользователя
                         transcript_data = server_content[field]
                         user_text = transcript_data.get("text", "").strip() if isinstance(transcript_data, dict) else str(transcript_data).strip()
                         
@@ -269,7 +260,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                             }))
                     
                     elif field in ["output_transcription", "outputTranscription"]:
-                        # Транскрипция AI
                         transcript_data = server_content[field]
                         ai_text = transcript_data.get("text", "").strip() if isinstance(transcript_data, dict) else str(transcript_data).strip()
                         
@@ -283,7 +273,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                             }))
 
             if server_content.get("turnComplete"):
-                # Завершаем транскрипцию пользователя
                 if self.user_transcript_buffer.strip():
                     final_user_text = self.user_transcript_buffer.strip()
                     if len(final_user_text) > 1:
@@ -291,14 +280,12 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                     
                     self.user_transcript_buffer = ""
                 
-                # Завершаем транскрипцию AI
                 if self.ai_transcript_buffer.strip():
                     final_ai_text = self.ai_transcript_buffer.strip()
                     self._append_history("assistant", final_ai_text)
                     
                     self.ai_transcript_buffer = ""
 
-        # Проверяем транскрипцию на верхнем уровне
         if "outputTranscription" in data:
             ai_text = data["outputTranscription"].strip()
             if ai_text:
@@ -353,7 +340,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             
             await self.send(text_data=json.dumps({
                 'type': msg_type,
-                'text': text,         # Оригинал (ключ для матчинга на фронте)
+                'text': text,
                 'translated': translated_text
             }))
 
@@ -407,7 +394,7 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                                 "mimeType": "audio/pcm;rate=16000"
                             }]
                         }
-                    })
+                    }) # Шиза какая-то
                 except Exception as e:
                     logger.error(f"Error sending audio: {e}")
 
@@ -416,7 +403,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         function_name = function_call.get('name')
         args = function_call.get('args', {})
         
-        # Если function_call содержит functionCalls, извлекаем первый
         if 'functionCalls' in function_call:
             function_calls = function_call['functionCalls']
             if function_calls and len(function_calls) > 0:
@@ -433,7 +419,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
     async def _handle_evaluation_tool_call(self, args):
         """Обработка tool call для оценки разговора"""
         try:
-            # Получаем все параметры оценки из tool call
             grammar_score = args.get('grammar_score', 0)
             vocabulary_score = args.get('vocabulary_score', 0)
             fluency_score = args.get('fluency_score', 0)
@@ -445,7 +430,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             recommendations = args.get('recommendations', [])
             detailed_feedback = args.get('detailed_feedback', '')
             
-            # Сохраняем результаты оценки
             submission = await self._save_evaluation_from_tool(
                 grammar_score, vocabulary_score, fluency_score, pronunciation_score,
                 relevance_score, conversation_flow, strengths, weaknesses, 
@@ -464,9 +448,8 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                     'submission': submission_payload
                 }))
                 
-                # Закрываем WebSocket после успешной оценки
                 logger.info("Evaluation complete, closing WebSocket connection")
-                await asyncio.sleep(0.5)  # Небольшая задержка для отправки сообщения
+                await asyncio.sleep(0.5)
                 await self._close_connections()
             else:
                 await self.send(text_data=json.dumps({
@@ -496,10 +479,8 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             submitted_at=timezone.now()
         )
         
-        # Используем историю разговора из consumer
         parsed_history = self.conversation_history
         
-        # Создаем evaluation_data из параметров tool call
         evaluation_data = {
             'grammar_score': grammar_score,
             'vocabulary_score': vocabulary_score,
@@ -513,14 +494,12 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             'detailed_feedback': detailed_feedback
         }
         
-        # Вычисляем общую оценку как среднее всех критериев
         scores = [
             grammar_score, vocabulary_score, fluency_score, 
             pronunciation_score, relevance_score, conversation_flow
         ]
         overall_score = sum(scores) / len(scores) if scores else 0
         
-        # Создаем запись с ответом от tool call
         AiConversationSubmissionAnswer.objects.create(
             submission=submission,
             transcript=parsed_history,
@@ -629,7 +608,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
             if json_match:
                 evaluation_data = json.loads(json_match.group())
                 
-                # Вычисляем общую оценку как среднее всех критериев
                 scores = [
                     evaluation_data.get('grammar_score', 0),
                     evaluation_data.get('vocabulary_score', 0),
@@ -640,7 +618,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
                 ]
                 overall_score = sum(scores) / len(scores)
                 
-                # Формируем краткий отзыв из подробного
                 detailed_feedback = evaluation_data.get('detailed_feedback', 'Ошибка оценки')
                 feedback = detailed_feedback[:200] + '...' if len(detailed_feedback) > 200 else detailed_feedback
                 
@@ -659,7 +636,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Grading error: {e}")
             
-        # Fallback при ошибке
         AiConversationSubmissionAnswer.objects.create(
             submission=submission,
             transcript=self.conversation_history,

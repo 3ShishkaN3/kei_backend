@@ -413,7 +413,7 @@ class TestSerializer(serializers.ModelSerializer):
                  image=ai_bg_file,
                  created_by=self._get_request_user()
              )
-             ai_conversation_data['background_image'] = created_bg_img
+             ai_conversation_data['background_image'] = created_bg_img.id
 
         image_file = validated_data.pop('attached_image_file', None)
         audio_file = validated_data.pop('attached_audio_file', None)

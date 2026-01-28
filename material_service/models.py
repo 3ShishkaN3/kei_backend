@@ -344,6 +344,12 @@ class AiConversationQuestion(models.Model):
         null=True, 
         verbose_name="Когда прощаться и заканчивать разговор (условие)"
     )
+    dictionaries = models.ManyToManyField(
+        'dict_service.DictionarySection',
+        blank=True,
+        related_name='ai_conversation_questions',
+        verbose_name="Словари для использования в разговоре"
+    )
 
     class Meta:
         verbose_name = "Настройка AI разговора"

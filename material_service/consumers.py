@@ -5,6 +5,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 from .models import Test, AiConversationQuestion, TestSubmission, AiConversationSubmissionAnswer
 from lesson_service.models import SectionItem
+from dict_service.models import DictionaryEntry
 from django.utils import timezone
 import asyncio
 import google.generativeai as genai
@@ -57,12 +58,25 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         context = self.question_config.context
         goodbye = self.question_config.goodbye_condition or "Попрощайся и закончи разговор."
         
+        # Получаем слова из выбранных словарей
+        dictionary_words = await self.get_dictionary_words(self.question_config)
+        words_instruction = ""
+        if dictionary_words:
+            words_list = ", ".join(dictionary_words)
+            words_instruction = f"""
+        
+        ВАЖНО - СЛОВА ДЛЯ ИСПОЛЬЗОВАНИЯ В РАЗГОВОРЕ:
+        Ты должна использовать следующие слова из словаря при общении с учеником: {words_list}
+        Старайся естественно вплетать эти слова в диалог, чтобы ученик мог их услышать и запомнить.
+        Используй эти слова в контексте разговора, но не перегружай диалог - используй их естественно.
+        """
+        
         self.system_instruction = f"""
         Ты — {personality}. Твой характер: аниме-тян, преподаватель японского языка.
         ОБЯЗАТЕЛЬНОЕ УСЛОВИЕ: Твои ответы должны быть СТРОГО на японском языке. 
         Не используй русский или английский в аудио-ответах, только японский.
         КОНТЕКСТ РАЗГОВОРА: {context}
-        КОНЕЦ ДИАЛОГА: {goodbye}
+        КОНЕЦ ДИАЛОГА: {goodbye}{words_instruction}
         
         КРИТИЧЕСКИ ВАЖНО: У тебя есть доступ к инструменту evaluate_conversation для оценки диалога.
         
@@ -696,4 +710,17 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_question_config(self, test):
-        return AiConversationQuestion.objects.get(test=test)
+        return AiConversationQuestion.objects.prefetch_related('dictionaries').get(test=test)
+
+    @database_sync_to_async
+    def get_dictionary_words(self, question_config):
+        """Получает список слов (term) из выбранных словарей"""
+        if not question_config.dictionaries.exists():
+            return []
+        
+        # Получаем все слова из выбранных словарей, только поле term
+        words = DictionaryEntry.objects.filter(
+            section__in=question_config.dictionaries.all()
+        ).values_list('term', flat=True).distinct()
+        
+        return list(words)

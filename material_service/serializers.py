@@ -185,11 +185,128 @@ class SpellingQuestionSerializer(serializers.ModelSerializer):
 
 class AiConversationQuestionSerializer(serializers.ModelSerializer):
     background_image_details = ImageMaterialSerializer(source='background_image', read_only=True, allow_null=True)
+    dictionaries_details = serializers.SerializerMethodField()
 
     class Meta:
         model = AiConversationQuestion
-        fields = ['id', 'background_image', 'background_image_details', 'context', 'personality', 'goodbye_condition']
-        extra_kwargs = {'test': {'read_only': True, 'required': False}}
+        fields = ['id', 'background_image', 'background_image_details', 'context', 'personality', 'goodbye_condition', 'dictionaries', 'dictionaries_details']
+        extra_kwargs = {
+            'test': {'read_only': True, 'required': False},
+            'background_image': {'required': False, 'allow_null': True}
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Переопределяем поле dictionaries с правильным queryset
+        from dict_service.models import DictionarySection
+        if 'dictionaries' in self.fields:
+            self.fields['dictionaries'] = serializers.PrimaryKeyRelatedField(
+                many=True,
+                queryset=DictionarySection.objects.all(),
+                required=False,
+                allow_null=True,
+                allow_empty=True
+            )
+
+    def to_internal_value(self, data):
+        """Преобразует объекты в ID перед валидацией"""
+        # Обрабатываем dictionaries - преобразуем объекты в ID
+        if 'dictionaries' in data and isinstance(data['dictionaries'], list):
+            normalized_dicts = []
+            for item in data['dictionaries']:
+                if isinstance(item, dict) and 'id' in item:
+                    normalized_dicts.append(item['id'])
+                elif hasattr(item, 'id'):
+                    normalized_dicts.append(item.id)
+                else:
+                    normalized_dicts.append(item)
+            data['dictionaries'] = normalized_dicts
+        
+        # Обрабатываем background_image - преобразуем объект в ID
+        if 'background_image' in data:
+            bg = data['background_image']
+            if isinstance(bg, dict) and 'id' in bg:
+                data['background_image'] = bg['id']
+            elif hasattr(bg, 'id'):
+                data['background_image'] = bg.id
+        
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        """Дополнительная валидация и нормализация"""
+        # Нормализуем dictionaries - убеждаемся, что это список ID
+        if 'dictionaries' in attrs:
+            dictionaries = attrs['dictionaries']
+            if dictionaries:
+                normalized = []
+                for item in dictionaries:
+                    if hasattr(item, 'id'):
+                        normalized.append(item.id)
+                    elif isinstance(item, dict) and 'id' in item:
+                        normalized.append(item['id'])
+                    else:
+                        normalized.append(item)
+                attrs['dictionaries'] = normalized
+        
+        # НЕ нормализуем background_image здесь - оставляем как есть
+        # Преобразование ID в объект будет в create/update
+        return attrs
+
+    def get_dictionaries_details(self, obj):
+        """Возвращает список словарей с информацией о курсе и названии"""
+        dictionaries = obj.dictionaries.select_related('course').all()
+        return [
+            {
+                'id': dict_section.id,
+                'title': dict_section.title,
+                'course_id': dict_section.course.id,
+                'course_title': dict_section.course.title,
+                'display_name': f"{dict_section.course.title} - {dict_section.title}"
+            }
+            for dict_section in dictionaries
+        ]
+
+    def create(self, validated_data):
+        """Создание с обработкой ManyToMany поля dictionaries и background_image"""
+        dictionaries = validated_data.pop('dictionaries', [])
+        
+        # Обрабатываем background_image - если это ID, получаем объект
+        if 'background_image' in validated_data:
+            bg = validated_data['background_image']
+            if bg and not hasattr(bg, 'save'):  # Если это не объект модели
+                from .models import ImageMaterial
+                try:
+                    validated_data['background_image'] = ImageMaterial.objects.get(pk=bg) if bg else None
+                except ImageMaterial.DoesNotExist:
+                    validated_data['background_image'] = None
+        
+        instance = super().create(validated_data)
+        if dictionaries:
+            # Убеждаемся, что это список ID (на случай, если пришли объекты)
+            dict_ids = [d.id if hasattr(d, 'id') else d for d in dictionaries if d]
+            instance.dictionaries.set(dict_ids)
+        return instance
+
+    def update(self, instance, validated_data):
+        """Обновление с обработкой ManyToMany поля dictionaries и background_image"""
+        dictionaries = validated_data.pop('dictionaries', None)
+        
+        # Обрабатываем background_image - если это ID, получаем объект
+        if 'background_image' in validated_data:
+            bg = validated_data['background_image']
+            if bg and not hasattr(bg, 'save'):  # Если это не объект модели
+                from .models import ImageMaterial
+                try:
+                    validated_data['background_image'] = ImageMaterial.objects.get(pk=bg) if bg else None
+                except ImageMaterial.DoesNotExist:
+                    validated_data['background_image'] = None
+        
+        instance = super().update(instance, validated_data)
+        if dictionaries is not None:
+            # Убеждаемся, что это список ID (на случай, если пришли объекты)
+            dict_ids = [d.id if hasattr(d, 'id') else d for d in dictionaries if d]
+            instance.dictionaries.set(dict_ids)
+        return instance
 
 
 
@@ -332,7 +449,33 @@ class TestSerializer(serializers.ModelSerializer):
     def _handle_nested_one_to_one(self, test_instance, nested_data, related_name_on_test, item_serializer_class):
         if nested_data is None and self.partial and related_name_on_test not in self.initial_data: return
         existing_item = getattr(test_instance, related_name_on_test, None)
-        if nested_data: 
+        if nested_data:
+            # Нормализуем данные перед передачей в сериализатор
+            # Преобразуем объекты в словари/ID для ai_conversation_question
+            if related_name_on_test == 'ai_conversation_question':
+                normalized_data = dict(nested_data)
+                # Нормализуем dictionaries
+                if 'dictionaries' in normalized_data:
+                    dicts = normalized_data['dictionaries']
+                    if dicts:
+                        normalized_dicts = []
+                        for item in dicts:
+                            if hasattr(item, 'id'):
+                                normalized_dicts.append(item.id)
+                            elif isinstance(item, dict) and 'id' in item:
+                                normalized_dicts.append(item['id'])
+                            else:
+                                normalized_dicts.append(item)
+                        normalized_data['dictionaries'] = normalized_dicts
+                # Нормализуем background_image
+                if 'background_image' in normalized_data:
+                    bg = normalized_data['background_image']
+                    if bg and hasattr(bg, 'id'):
+                        normalized_data['background_image'] = bg.id
+                    elif bg and isinstance(bg, dict) and 'id' in bg:
+                        normalized_data['background_image'] = bg['id']
+                nested_data = normalized_data
+            
             if existing_item:
                 item_serializer = item_serializer_class(instance=existing_item, data=nested_data, partial=True, context=self.context)
                 item_serializer.is_valid(raise_exception=True); item_serializer.save()

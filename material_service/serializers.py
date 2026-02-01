@@ -50,6 +50,10 @@ class MCQOptionSerializer(serializers.ModelSerializer):
         fields = ['id', 'text', 'is_correct', 'feedback', 'explanation', 'order']
         extra_kwargs = {'test': {'read_only': True, 'required': False}}
 
+    def to_internal_value(self, data):
+        """Handle already validated objects in nested writes"""
+        return super().to_internal_value(data)
+
 class MatchingPairSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False, allow_null=True)
     prompt_image_details = ImageMaterialSerializer(source='prompt_image', read_only=True, allow_null=True)
@@ -70,6 +74,16 @@ class MatchingPairSerializer(serializers.ModelSerializer):
             'prompt_image': {'required': False, 'allow_null': True},
             'prompt_audio': {'required': False, 'allow_null': True},
         }
+
+    def to_internal_value(self, data):
+        """Handle already validated objects in nested writes"""
+        if 'prompt_image' in data:
+            val = data['prompt_image']
+            if hasattr(val, 'id'): data['prompt_image'] = val.id
+        if 'prompt_audio' in data:
+            val = data['prompt_audio']
+            if hasattr(val, 'id'): data['prompt_audio'] = val.id
+        return super().to_internal_value(data)
 
     def _get_request_user(self):
         request = self.context.get('request')
@@ -356,6 +370,16 @@ class TestSerializer(serializers.ModelSerializer):
             'draggable_options_pool': {'required': False, 'allow_null': True},
         }
 
+    def to_internal_value(self, data):
+        """Handle already validated objects in nested writes"""
+        if 'attached_image' in data:
+            val = data['attached_image']
+            if hasattr(val, 'id'): data['attached_image'] = val.id
+        if 'attached_audio' in data:
+            val = data['attached_audio']
+            if hasattr(val, 'id'): data['attached_audio'] = val.id
+        return super().to_internal_value(data)
+
     def _get_request_user(self):
         request = self.context.get('request')
         if request and hasattr(request, 'user') and request.user.is_authenticated:
@@ -421,23 +445,47 @@ class TestSerializer(serializers.ModelSerializer):
         manager = getattr(test_instance, related_manager_name)
         existing_items_map = {item.id: item for item in manager.all()}
         current_ids_in_payload = set()
+        
+        # We should try to find the raw data from initial_data to avoid 'object instead of id' errors during double validation
+        raw_nested_data = self.initial_data.get(related_manager_name, [])
+        raw_items_map = {}
+        if isinstance(raw_nested_data, list):
+            for raw_item in raw_nested_data:
+                # Use order or id to map
+                r_id = raw_item.get('id')
+                if r_id: raw_items_map[r_id] = raw_item
+
         order_counter = 0
         for item_data in nested_data_list:
             item_id = item_data.get('id')
             item_data['order'] = order_counter
 
-            nested_serializer_context = self.context.copy()
-            nested_serializer_context['prompt_image_file'] = slot_image_files[order_counter] if slot_image_files and order_counter < len(slot_image_files) else None
-            nested_serializer_context['prompt_audio_file'] = slot_audio_files[order_counter] if slot_audio_files and order_counter < len(slot_audio_files) else None
+            # Use raw data for validation if possible
+            validation_data = raw_items_map.get(item_id, item_data) if item_id else item_data
 
+            nested_serializer_context = self.context.copy()
+            
+            # Identify which file belongs to this slot
+            item_temp_id = item_data.get('id')
+            if item_temp_id:
+                # Try finding it in request.FILES by a specific key like 'prompt_image_file_temp_slot_xxx'
+                request_files = self.context.get('request').FILES if 'request' in self.context else {}
+                nested_serializer_context['prompt_image_file'] = request_files.get(f'prompt_image_file_{item_temp_id}')
+                nested_serializer_context['prompt_audio_file'] = request_files.get(f'prompt_audio_file_{item_temp_id}')
+            
             if item_id and item_id in existing_items_map:
-                item_serializer = item_serializer_class(existing_items_map[item_id], data=item_data, partial=True, context=nested_serializer_context)
+                item_serializer = item_serializer_class(existing_items_map[item_id], data=validation_data, partial=True, context=nested_serializer_context)
                 item_serializer.is_valid(raise_exception=True)
                 item_serializer.save()
                 current_ids_in_payload.add(item_id)
             else:
-                item_data.pop('id', None)
-                item_serializer = item_serializer_class(data=item_data, context=nested_serializer_context)
+                if 'id' in validation_data:
+                    validation_copy = validation_data.copy()
+                    validation_copy.pop('id', None)
+                else:
+                    validation_copy = validation_data
+                    
+                item_serializer = item_serializer_class(data=validation_copy, context=nested_serializer_context)
                 item_serializer.is_valid(raise_exception=True)
                 new_item = item_serializer.save(test=test_instance)
                 current_ids_in_payload.add(new_item.id)
@@ -577,7 +625,7 @@ class TestSerializer(serializers.ModelSerializer):
         self._handle_nested_many_to_many(test_instance, mcq_options_data, 'mcq_options', MCQOptionSerializer)
         self._handle_nested_many_to_many(test_instance, drag_drop_slots_data, 'drag_drop_slots', MatchingPairSerializer, slot_image_files=slot_image_files, slot_audio_files=slot_audio_files)
         self._handle_nested_one_to_one(test_instance, free_text_data, 'free_text_question', FreeTextQuestionSerializer)
-        self._handle_nested_one_to_one(test_instance, word_order_data, 'word_order_sentence', WordOrderSentenceSerializer)
+        self._handle_nested_one_to_one(test_instance, word_order_data, 'word_order_sentence_details', WordOrderSentenceSerializer)
         self._handle_nested_one_to_one(test_instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         self._handle_nested_one_to_one(test_instance, spelling_data, 'spelling_question', SpellingQuestionSerializer)
         self._handle_nested_one_to_one(test_instance, ai_conversation_data, 'ai_conversation_question', AiConversationQuestionSerializer)
@@ -632,7 +680,7 @@ class TestSerializer(serializers.ModelSerializer):
         if free_text_data is not None or ('free_text_question' in self.initial_data and self.initial_data.get('free_text_question') is None):
              self._handle_nested_one_to_one(instance, free_text_data, 'free_text_question', FreeTextQuestionSerializer)
         if word_order_data is not None or ('word_order_sentence' in self.initial_data and self.initial_data.get('word_order_sentence') is None):
-            self._handle_nested_one_to_one(instance, word_order_data, 'word_order_sentence', WordOrderSentenceSerializer)
+            self._handle_nested_one_to_one(instance, word_order_data, 'word_order_sentence_details', WordOrderSentenceSerializer)
         if pronunciation_data is not None or ('pronunciation_question' in self.initial_data and self.initial_data.get('pronunciation_question') is None):
             self._handle_nested_one_to_one(instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         if spelling_data is not None or ('spelling_question' in self.initial_data and self.initial_data.get('spelling_question') is None):

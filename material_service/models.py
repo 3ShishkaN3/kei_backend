@@ -49,6 +49,55 @@ class ImageMaterial(models.Model):
     def __str__(self):
         return self.title or f"Изображение #{self.id}"
 
+    def save(self, *args, **kwargs):
+        # Auto-compress image to reduce 'weight'
+        # We check if we are already processing it via a custom attribute to avoid infinite recursion
+        if hasattr(self, '_already_saving'):
+            super().save(*args, **kwargs)
+            return
+
+        if self.image:
+            from PIL import Image
+            import io
+            from django.core.files.base import ContentFile
+            import os
+
+            try:
+                # Open the image using Pillow
+                img = Image.open(self.image)
+                
+                # Convert to RGB if necessary
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                
+                # Resize if it's very large
+                max_size = (1600, 1600)
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                
+                # Compress with reduced quality
+                buffer = io.BytesIO()
+                img.save(buffer, format='JPEG', quality=80, optimize=True)
+                buffer.seek(0)
+                
+                # Update the file name and content
+                original_name = os.path.basename(self.image.name)
+                name_without_ext = os.path.splitext(original_name)[0]
+                new_filename = f"{name_without_ext}.jpg"
+                
+                self.image.save(new_filename, ContentFile(buffer.read()), save=False)
+                
+                # Keep original and new to track
+                # print(f"Compressed {original_name} to {new_filename}")
+            except Exception as e:
+                # Log error or ignore if not an image
+                print(f"Error compressing image: {e}")
+        
+        self._already_saving = True
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            delattr(self, '_already_saving')
+
 class AudioMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     audio_file = models.FileField(
@@ -226,7 +275,7 @@ class WordOrderSentence(models.Model):
         Test,
         on_delete=models.CASCADE,
         related_name='word_order_sentence_details',
-        limit_choices_to={'test_type': 'word_order'},
+        limit_choices_to={'test_type': 'word-order'},
         verbose_name="Задание на порядок слов"
     )
     correct_ordered_texts = models.JSONField(

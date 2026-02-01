@@ -327,7 +327,7 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 class TestSerializer(serializers.ModelSerializer):
     mcq_options = MCQOptionSerializer(many=True, required=False, allow_null=True)
     free_text_question = FreeTextQuestionSerializer(required=False, allow_null=True)
-    word_order_sentence = WordOrderSentenceSerializer(required=False, allow_null=True) 
+    word_order_sentence = WordOrderSentenceSerializer(source='word_order_sentence_details', required=False, allow_null=True) 
     pronunciation_question = PronunciationQuestionSerializer(required=False, allow_null=True)
     spelling_question = SpellingQuestionSerializer(required=False, allow_null=True)
     ai_conversation_question = AiConversationQuestionSerializer(required=False, allow_null=True)

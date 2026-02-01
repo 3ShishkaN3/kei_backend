@@ -50,8 +50,6 @@ class ImageMaterial(models.Model):
         return self.title or f"Изображение #{self.id}"
 
     def save(self, *args, **kwargs):
-        # Auto-compress image to reduce 'weight'
-        # We check if we are already processing it via a custom attribute to avoid infinite recursion
         if hasattr(self, '_already_saving'):
             super().save(*args, **kwargs)
             return
@@ -63,33 +61,26 @@ class ImageMaterial(models.Model):
             import os
 
             try:
-                # Open the image using Pillow
                 img = Image.open(self.image)
                 
-                # Convert to RGB if necessary
                 if img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
                 
-                # Resize if it's very large
                 max_size = (1600, 1600)
                 img.thumbnail(max_size, Image.Resampling.LANCZOS)
                 
-                # Compress with reduced quality
                 buffer = io.BytesIO()
                 img.save(buffer, format='JPEG', quality=80, optimize=True)
                 buffer.seek(0)
                 
-                # Update the file name and content
                 original_name = os.path.basename(self.image.name)
                 name_without_ext = os.path.splitext(original_name)[0]
                 new_filename = f"{name_without_ext}.jpg"
                 
                 self.image.save(new_filename, ContentFile(buffer.read()), save=False)
                 
-                # Keep original and new to track
                 # print(f"Compressed {original_name} to {new_filename}")
             except Exception as e:
-                # Log error or ignore if not an image
                 print(f"Error compressing image: {e}")
         
         self._already_saving = True

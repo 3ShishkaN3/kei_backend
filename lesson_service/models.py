@@ -34,6 +34,12 @@ class Lesson(models.Model):
         verbose_name="Порядок в курсе",
         help_text="Определяет ручной порядок отображения уроков внутри курса"
     )
+    table_of_contents = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Оглавление",
+        help_text="Опциональное оглавление или краткое описание содержания урока"
+    )
 
     class Meta:
         verbose_name = "Урок"

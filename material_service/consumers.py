@@ -58,7 +58,6 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         context = self.question_config.context
         goodbye = self.question_config.goodbye_condition or "Попрощайся и закончи разговор."
         
-        # Получаем слова из выбранных словарей
         dictionary_words = await self.get_dictionary_words(self.question_config)
         words_instruction = ""
         if dictionary_words:
@@ -718,9 +717,32 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         if not question_config.dictionaries.exists():
             return []
         
-        # Получаем все слова из выбранных словарей, только поле term
         words = DictionaryEntry.objects.filter(
             section__in=question_config.dictionaries.all()
         ).values_list('term', flat=True).distinct()
         
         return list(words)
+
+
+class TestSubmissionConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.submission_id = self.scope['url_route']['kwargs']['submission_id']
+        self.group_name = f"submission_{self.submission_id}"
+
+        await self.channel_layer.group_add(
+            self.group_name,
+            self.channel_name
+        )
+
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(
+            self.group_name,
+            self.channel_name
+        )
+
+    async def send_update(self, event):
+        content = event['content']
+
+        await self.send(text_data=json.dumps(content))

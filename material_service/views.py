@@ -4,6 +4,8 @@ from rest_framework import viewsets, status, mixins, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+import google.generativeai as genai
+from django.conf import settings
 
 from .models import (
     TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial,
@@ -63,6 +65,7 @@ class TestViewSet(BaseMaterialViewSet):
         'word_order_sentence_details',
         'pronunciation_question',
         'spelling_question',
+        'ai_conversation_question',
         'attached_image',
         'attached_audio',
         'created_by'
@@ -194,7 +197,7 @@ class TestViewSet(BaseMaterialViewSet):
              )
 
         submission_status = 'submitted'
-        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling']:
+        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
             submission_status = 'grading_pending'
 
         submission_instance = None
@@ -280,7 +283,7 @@ class TestViewSet(BaseMaterialViewSet):
                 if test_type in ['mcq-single', 'mcq-multi', 'word-order', 'drag-and-drop']:
                     self._perform_auto_check(test_instance, answers_data_from_json, submission_instance)
                 
-                if test_type in ['free-text', 'pronunciation', 'spelling']:
+                if test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
                     submission_instance.status = 'grading_pending'
                     submission_instance.save(update_fields=['status'])
 
@@ -320,6 +323,55 @@ class TestViewSet(BaseMaterialViewSet):
         
         submission_detail_serializer = TestSubmissionDetailSerializer(submission_instance, context=response_serializer_context)
         return Response(submission_detail_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=['post'],
+        permission_classes=[IsAuthenticated],
+        parser_classes=[parsers.JSONParser]
+    )
+    def translate_subtitle(self, request):
+        """
+        Переводит текстовый субтитр с японского на русский
+        """
+        text = request.data.get('text')
+        if not text or not text.strip():
+            return Response(
+                {"error": "Text is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            model = genai.GenerativeModel('models/gemini-2.5-flash')
+            
+            prompt = f"""
+            Ты — переводчик субтитров. 
+            Переведи следующий текст с японского на русский язык.
+            
+            Текст: "{text}"
+            
+            Требования:
+            1. Только русский перевод.
+            2. Естественный разговорный стиль.
+            3. Никаких пояснений, только текст.
+            """
+            
+            response = model.generate_content(prompt)
+            translated_text = response.text.strip()
+            
+            translated_text = translated_text.strip('"\'')
+            
+            return Response({
+                'original_text': text,
+                'translated_text': translated_text
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Translation failed: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 

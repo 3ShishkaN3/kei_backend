@@ -15,16 +15,26 @@ def get_user_show_learned_setting(user):
 
 class DictionarySectionSerializer(serializers.ModelSerializer):
     course_id = serializers.IntegerField(source='course.id', read_only=True)
+    course = serializers.SerializerMethodField()
     created_by_details = UserSerializer(source='created_by', read_only=True)
     entry_count = serializers.SerializerMethodField()
 
     class Meta:
         model = DictionarySection
         fields = [
-            'id', 'course_id', 'title', 'banner_image', 'is_primary',
+            'id', 'course_id', 'course', 'title', 'banner_image', 'is_primary',
             'created_by', 'created_by_details', 'created_at', 'updated_at', 'entry_count'
         ]
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'created_by_details', 'entry_count')
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'created_by_details', 'entry_count', 'course')
+
+    def get_course(self, obj):
+        """Возвращает информацию о курсе"""
+        if obj.course:
+            return {
+                'id': obj.course.id,
+                'title': obj.course.title
+            }
+        return None
 
     def get_entry_count(self, obj):
         return obj.entries.count()
@@ -32,6 +42,7 @@ class DictionarySectionSerializer(serializers.ModelSerializer):
 class DictionaryEntrySerializer(serializers.ModelSerializer):
     section_id = serializers.IntegerField(source='section.id', read_only=True)
     lesson_id = serializers.IntegerField(source='lesson.id', read_only=True, allow_null=True)
+    lesson_title = serializers.CharField(source='lesson.title', read_only=True, allow_null=True)
     created_by_details = UserSerializer(source='created_by', read_only=True)
     pronunciation_audio_url = serializers.SerializerMethodField()
     is_learned = serializers.SerializerMethodField()
@@ -39,7 +50,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = DictionaryEntry
         fields = [
-            'id', 'section_id', 'lesson_id', 'term', 'reading', 'translation',
+            'id', 'section_id', 'lesson_id', 'lesson_title', 'term', 'reading', 'translation',
             'pronunciation_audio', 'pronunciation_audio_url',
             'created_by', 'created_by_details', 'created_at', 'updated_at',
             'is_learned'

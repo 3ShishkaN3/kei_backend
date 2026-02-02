@@ -4,22 +4,40 @@ from decouple import config, Csv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = config('SECRET_KEY')
+SECRET_KEY = config('SECRET_KEY', default='test-key-for-development')
 
-DEBUG = config('DEBUG', cast=bool)
-
-
+DEBUG = config('DEBUG', cast=bool, default=True)
 
 
-CELERY_BROKER_URL = config('CELERY_BROKER_URL')
-CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND')
+
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
 
-# LLM Grading Service
+ASGI_APPLICATION = 'kei_backend.asgi.application'
+
+REDIS_HOST = config('REDIS_HOST', default='redis')
+REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
+        },
+    },
+}
+
+WEBPUSH_SETTINGS = {
+    "VAPID_PUBLIC_KEY": config("VAPID_PUBLIC_KEY", default=""),
+    "VAPID_PRIVATE_KEY": config("VAPID_PRIVATE_KEY", default=""),
+    "VAPID_ADMIN_EMAIL": config("VAPID_ADMIN_EMAIL", default="admin@keisenpai.com")
+}
+
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
 
@@ -31,6 +49,7 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -57,6 +76,9 @@ INSTALLED_APPS = [
     'calendar_service',
     'achievement_service',
     'bonus_service',
+    'notification_service.apps.NotificationServiceConfig',
+    'channels',
+    'webpush',
     'storages',
 ]
 
@@ -73,10 +95,10 @@ MIDDLEWARE = [
 ]
 
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv(), default='localhost,127.0.0.1')
 
-TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN')
-TEACHER_CHAT_ID = config('TEACHER_CHAT_ID')
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+TEACHER_CHAT_ID = config('TEACHER_CHAT_ID', default='')
 
 SWAGGER_SETTINGS = {
     'DEFAULT_AUTO_SCHEMA_CLASS': 'drf_yasg.inspectors.SwaggerAutoSchema',
@@ -102,15 +124,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'kei_backend.wsgi.application'
 
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST'),
-        'PORT': config('DB_PORT', cast=int),
+        'NAME': config('DB_NAME', default='kei_db'),
+        'USER': config('DB_USER', default='kei_user'),
+        'PASSWORD': config('DB_PASSWORD', default='kei_password'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', cast=int, default=5432),
     }
 }
 
@@ -149,26 +170,18 @@ CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_DOMAIN = "localhost"
+
+CSRF_COOKIE_DOMAIN = "keisenpai.com"
+SESSION_COOKIE_SECURE = True
 
 SESSION_COOKIE_SECURE = False
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'sessionid'
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5000',
-    'https://keisenpai.com',
-    'http://100.113.223.9:5000',
-    'http://192.168.1.16:5000',
-]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5000',
-    'https://keisenpai.com',
-    'http://100.113.223.9:5000',
-    'http://192.168.1.16:5000',
-]
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
 
 
 AUTHENTICATION_BACKENDS = [
@@ -187,12 +200,12 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST')
-EMAIL_PORT = config('EMAIL_PORT', cast=int)
-EMAIL_USE_SSL = config('EMAIL_USE_SSL', cast=bool)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
+EMAIL_HOST = config('EMAIL_HOST', default='localhost')
+EMAIL_PORT = config('EMAIL_PORT', cast=int, default=587)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', cast=bool, default=False)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@example.com')
 
 LOGGING = {
     "version": 1,

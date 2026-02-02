@@ -21,7 +21,7 @@ from course_service.models import Course
 class LessonPagination(PageNumberPagination):
     page_size = 4
     page_size_query_param = 'page_size'
-    max_page_size = 100
+    max_page_size = 1000
 
 
 class LessonViewSet(viewsets.ModelViewSet):
@@ -64,7 +64,10 @@ class LessonViewSet(viewsets.ModelViewSet):
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, course):
              self.permission_denied(self.request, message="У вас нет прав на добавление уроков в этот курс.")
 
-        serializer.save(created_by=self.request.user, course=course)
+        max_order = Lesson.objects.filter(course=course).aggregate(Max('order'))['order__max']
+        next_order = (max_order or 0) + 1 if max_order is not None else 0
+
+        serializer.save(created_by=self.request.user, course=course, order=next_order)
 
     def perform_update(self, serializer):
         instance = serializer.instance

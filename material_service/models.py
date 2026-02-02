@@ -49,6 +49,46 @@ class ImageMaterial(models.Model):
     def __str__(self):
         return self.title or f"Изображение #{self.id}"
 
+    def save(self, *args, **kwargs):
+        if hasattr(self, '_already_saving'):
+            super().save(*args, **kwargs)
+            return
+
+        if self.image:
+            from PIL import Image
+            import io
+            from django.core.files.base import ContentFile
+            import os
+
+            try:
+                img = Image.open(self.image)
+                
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                
+                max_size = (1600, 1600)
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                
+                buffer = io.BytesIO()
+                img.save(buffer, format='JPEG', quality=80, optimize=True)
+                buffer.seek(0)
+                
+                original_name = os.path.basename(self.image.name)
+                name_without_ext = os.path.splitext(original_name)[0]
+                new_filename = f"{name_without_ext}.jpg"
+                
+                self.image.save(new_filename, ContentFile(buffer.read()), save=False)
+                
+                # print(f"Compressed {original_name} to {new_filename}")
+            except Exception as e:
+                print(f"Error compressing image: {e}")
+        
+        self._already_saving = True
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            delattr(self, '_already_saving')
+
 class AudioMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     audio_file = models.FileField(
@@ -148,6 +188,7 @@ class Test(models.Model):
         ('drag-and-drop', 'Перетаскивание элементов (облачка и ячейки)'),
         ('pronunciation', 'Проверка произношения'),
         ('spelling', 'Проверка правописания'),
+        ('ai-conversation', 'AI Разговор (Кайва с сенсеем)'),
     )
     title = models.CharField(max_length=255, verbose_name="Название теста")
     description = models.TextField(blank=True, verbose_name="Описание/Инструкция к тесту")
@@ -225,7 +266,7 @@ class WordOrderSentence(models.Model):
         Test,
         on_delete=models.CASCADE,
         related_name='word_order_sentence_details',
-        limit_choices_to={'test_type': 'word_order'},
+        limit_choices_to={'test_type': 'word-order'},
         verbose_name="Задание на порядок слов"
     )
     correct_ordered_texts = models.JSONField(
@@ -315,6 +356,47 @@ class SpellingQuestion(models.Model):
 
     def __str__(self):
         return f"Вопрос на правописание для теста: {self.test.title}"
+
+class AiConversationQuestion(models.Model):
+    test = models.OneToOneField(
+        Test,
+        on_delete=models.CASCADE,
+        related_name='ai_conversation_question',
+        limit_choices_to={'test_type': 'ai-conversation'},
+        verbose_name="Тест AI Разговор"
+    )
+    background_image = models.ForeignKey(
+        ImageMaterial, 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL,
+        related_name='ai_tests_using_background', 
+        verbose_name="Фон для разговора"
+    )
+    context = models.TextField(verbose_name="Контекст разговора (О чём общаться)")
+    personality = models.TextField(
+        blank=True, 
+        null=True, 
+        verbose_name="Личность/Характер модели (Опишите от себя)"
+    )
+    goodbye_condition = models.TextField(
+        blank=True, 
+        null=True, 
+        verbose_name="Когда прощаться и заканчивать разговор (условие)"
+    )
+    dictionaries = models.ManyToManyField(
+        'dict_service.DictionarySection',
+        blank=True,
+        related_name='ai_conversation_questions',
+        verbose_name="Словари для использования в разговоре"
+    )
+
+    class Meta:
+        verbose_name = "Настройка AI разговора"
+        verbose_name_plural = "Настройки AI разговоров"
+
+    def __str__(self):
+        return f"AI Разговор для теста: {self.test.title}"
 
 class TestSubmission(models.Model):
     SUBMISSION_STATUS_CHOICES = (
@@ -432,3 +514,113 @@ class SpellingSubmissionAnswer(models.Model):
     class Meta:
         verbose_name = "Ответ на правописание"
         verbose_name_plural = "Ответы на правописание"
+
+class AiConversationSubmissionAnswer(models.Model):
+    submission = models.OneToOneField(
+        TestSubmission, 
+        on_delete=models.CASCADE, 
+        related_name='ai_conversation_answer',
+        verbose_name="Отправка теста"
+    )
+    transcript = models.JSONField(
+        default=list, 
+        verbose_name="История разговора (JSON)"
+    )
+    overall_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True, 
+        verbose_name="Итоговая оценка (авто)"
+    )
+    evaluation_details = models.JSONField(
+        default=dict, 
+        verbose_name="Детальная оценка (акцент, грамматика и т.д.)"
+    )
+
+    class Meta:
+        verbose_name = "Ответ на AI разговор"
+        verbose_name_plural = "Ответы на AI разговоры"
+
+    def __str__(self):
+        return f"Оценка AI разговора для submission {self.submission_id}"
+
+# JSON schema for evaluation_details
+AI_CONVERSATION_EVALUATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "grammar_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка грамматики (0-100)"
+        },
+        "vocabulary_score": {
+            "type": "number", 
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка лексики (0-100)"
+        },
+        "fluency_score": {
+            "type": "number",
+            "minimum": 0, 
+            "maximum": 100,
+            "description": "Оценка беглости речи (0-100)"
+        },
+        "pronunciation_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100, 
+            "description": "Оценка произношения (0-100)"
+        },
+        "relevance_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка релевантности ответов (0-100)"
+        },
+        "conversation_flow": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Оценка течения разговора (0-100)"
+        },
+        "strengths": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Сильные стороны ученика"
+        },
+        "weaknesses": {
+            "type": "array", 
+            "items": {
+                "type": "string"
+            },
+            "description": "Слабые стороны ученика"
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Рекомендации по улучшению"
+        },
+        "detailed_feedback": {
+            "type": "string",
+            "description": "Подробный отзыв на русском языке"
+        }
+    },
+    "required": [
+        "grammar_score",
+        "vocabulary_score", 
+        "fluency_score",
+        "pronunciation_score",
+        "relevance_score",
+        "conversation_flow",
+        "strengths",
+        "weaknesses",
+        "recommendations",
+        "detailed_feedback"
+    ]
+}

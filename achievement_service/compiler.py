@@ -35,6 +35,8 @@ class GraphCompiler:
                 params['section_id'] = data.get('section_id')
             elif trigger_type == 'ON_TEST_PASSED':
                 params['test_id'] = data.get('test_id')
+            elif trigger_type in ['ON_TERM_LEARNED', 'ON_WORD_LEARNED']:
+                params['entry_id'] = data.get('entry_id')
             elif trigger_type == 'PERIODIC_CHECK':
                 params['frequency'] = data.get('frequency')
             

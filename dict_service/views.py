@@ -19,6 +19,9 @@ from .permissions import (
 from course_service.models import Course
 from lesson_service.models import Lesson
 
+from django.utils import timezone
+from kei_backend.utils import send_to_kafka
+
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
@@ -106,7 +109,7 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
         if not CanViewDictionaryContent().has_object_permission(self.request, self, section):
             self.permission_denied(self.request, message="Нет доступа к этому разделу словаря.")
 
-        queryset = DictionaryEntry.objects.filter(section=section).select_related('lesson') # Добавляем lesson
+        queryset = DictionaryEntry.objects.filter(section=section).select_related('lesson')
 
         if user.is_authenticated:
              queryset = queryset.annotate(
@@ -178,6 +181,15 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
         serializer = UserLearnedEntrySerializer(learned_entry)
         if created:
+            send_to_kafka('progress_events', {
+                'type': 'term_learned',
+                'user_id': user.id,
+                'entry_id': entry.id,
+                'term': entry.term,
+                'section_id': entry.section_id,
+                'course_id': entry.section.course_id,
+                'timestamp': timezone.now().isoformat()
+            })
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -235,7 +247,7 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = DictionaryEntrySerializer
-    permission_classes = [IsAuthenticated] # Доступ проверяется через урок
+    permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter] 
     search_fields = ['term', 'reading', 'translation']
@@ -285,6 +297,74 @@ class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet
                  queryset = queryset.filter(user_has_learned=False)
 
         return queryset
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def meta(self, request, course_pk=None, lesson_pk=None):
+        lesson_pk = self.kwargs.get('lesson_pk')
+        user = request.user
+
+        if not lesson_pk:
+            return Response({"error": "lesson_pk is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        lesson = get_object_or_404(
+            Lesson.objects.select_related('course'),
+            pk=lesson_pk
+        )
+
+        if not CanViewDictionaryContent().has_object_permission(self.request, self, lesson.course):
+            self.permission_denied(self.request, message="Нет доступа к словарю этого урока.")
+
+        try:
+            primary_section = DictionarySection.objects.get(course=lesson.course, is_primary=True)
+        except DictionarySection.DoesNotExist:
+            return Response({
+                "total_count": 0,
+                "learned_count": 0,
+                "unlearned_count": 0,
+                "course_id": lesson.course_id,
+                "lesson_id": lesson.id,
+                "lesson_title": lesson.title,
+                "section_id": None,
+                "section_title": None,
+            })
+        except DictionarySection.MultipleObjectsReturned:
+            primary_section = DictionarySection.objects.filter(course=lesson.course, is_primary=True).first()
+            if not primary_section:
+                return Response({
+                    "total_count": 0,
+                    "learned_count": 0,
+                    "unlearned_count": 0,
+                    "course_id": lesson.course_id,
+                    "lesson_id": lesson.id,
+                    "lesson_title": lesson.title,
+                    "section_id": None,
+                    "section_title": None,
+                })
+
+        base_queryset = DictionaryEntry.objects.filter(section=primary_section, lesson=lesson)
+        total_count = base_queryset.count()
+
+        learned_count = 0
+        unlearned_count = total_count
+        if user.is_authenticated:
+            learned_entries = UserLearnedEntry.objects.filter(
+                user=user,
+                entry__section=primary_section,
+                entry__lesson=lesson
+            ).values_list('entry_id', flat=True)
+            learned_count = len(learned_entries)
+            unlearned_count = total_count - learned_count
+
+        return Response({
+            "total_count": total_count,
+            "learned_count": learned_count,
+            "unlearned_count": unlearned_count,
+            "course_id": lesson.course_id,
+            "lesson_id": lesson.id,
+            "lesson_title": lesson.title,
+            "section_id": primary_section.id,
+            "section_title": primary_section.title,
+        })
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

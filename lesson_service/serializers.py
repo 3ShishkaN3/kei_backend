@@ -313,6 +313,7 @@ class LessonListSerializer(serializers.ModelSerializer):
     section_count = serializers.SerializerMethodField()
     course_id = serializers.ReadOnlyField(source='course.id')
     completion_percentage = serializers.SerializerMethodField()
+    is_locked = serializers.SerializerMethodField()
     order = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -320,11 +321,38 @@ class LessonListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'cover_image', 'course_id', 'order',
             'created_by_name', 'created_at', 'updated_at', 'section_count',
-            'completion_percentage'
+            'completion_percentage', 'is_locked', 'table_of_contents'
         ]
 
     def get_section_count(self, obj):
         return obj.sections.count()
+
+    def get_is_locked(self, obj):
+        request = self.context.get('request')
+        
+        if not request or not hasattr(request, 'user'):
+            return False
+            
+        user = request.user
+        
+        if not user or not user.is_authenticated:
+            previous_lesson = Lesson.objects.filter(course_id=obj.course_id, order__lt=obj.order).order_by('-order').first()
+            return previous_lesson is not None
+        
+        if hasattr(user, 'role') and user.role in ['admin', 'teacher', 'assistant']:
+            return False
+            
+        previous_lesson = Lesson.objects.filter(course_id=obj.course_id, order__lt=obj.order).order_by('-order').first()
+        
+        if not previous_lesson:
+            return False
+            
+        is_prev_completed = LessonCompletion.objects.filter(
+            lesson=previous_lesson, 
+            student=user
+        ).exists()
+        
+        return not is_prev_completed
 
     def get_completion_percentage(self, obj):
         request = self.context.get('request')
@@ -363,7 +391,7 @@ class LessonDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'course_id', 'title', 'cover_image', 'order',
             'created_by', 'created_at', 'updated_at', 'sections', 'is_completed',
-            'completion_percentage'
+            'completion_percentage', 'table_of_contents'
         ]
         read_only_fields = ('created_by', 'created_at', 'updated_at', 'sections', 'is_completed', 'course_id', 'completion_percentage', 'order')
 

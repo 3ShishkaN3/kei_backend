@@ -13,10 +13,22 @@ from .models import User, ConfirmationCode, User
 
 class UserSerializer(serializers.ModelSerializer):
     """Сериализатор для отображения данных пользователя."""
+    avatar = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ("id", "username", "email", "role", "is_active")
+        fields = ("id", "username", "email", "role", "is_active", "avatar")
+
+    def get_avatar(self, obj):
+        try:
+            if hasattr(obj, 'profile') and obj.profile.avatar:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.profile.avatar.url)
+                return obj.profile.avatar.url
+        except Exception:
+            pass
+        return None
 
 
 class RegisterSerializer(serializers.ModelSerializer):

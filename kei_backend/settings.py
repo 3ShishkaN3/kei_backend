@@ -41,6 +41,9 @@ WEBPUSH_SETTINGS = {
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
 
+KANJI_PAD_GRPC_ADDR = config('KANJI_PAD_GRPC_ADDR', default='kanji-pad-grpc:50051')
+KANJI_PAD_GRPC_TIMEOUT_SECONDS = config('KANJI_PAD_GRPC_TIMEOUT_SECONDS', cast=float, default=3.0)
+
 CELERY_BEAT_SCHEDULE = {
     'cleanup-expired-confirmation-codes': {
         'task': 'auth_service.tasks.cleanup_expired_confirmation_codes',

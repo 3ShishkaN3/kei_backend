@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.db.models import Exists, OuterRef
+import grpc
 from rest_framework import viewsets, status, filters, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -21,6 +22,9 @@ from lesson_service.models import Lesson
 
 from django.utils import timezone
 from kei_backend.utils import send_to_kafka
+
+from .kanji_recognition_service import KanjiRecognitionService
+from .kanji_serializers import KanjiRecognizeRequestSerializer, KanjiRecognizeResponseSerializer
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 20
@@ -243,6 +247,41 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
             "section_id": section.id,
             "section_title": section.title
         })
+
+
+class KanjiRecognitionViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def recognize(self, request):
+        serializer = KanjiRecognizeRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        strokes = serializer.validated_data['strokes']
+        top_n = serializer.validated_data.get('top_n', 5)
+
+        service = KanjiRecognitionService()
+        try:
+            results = service.recognize(strokes=strokes, top_n=top_n)
+        except grpc.RpcError as e:
+            return Response(
+                {
+                    'detail': f'gRPC error: {e.code().name}',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'detail': f'Failed to recognize kanji: {e}',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response_data = {'results': results}
+        out = KanjiRecognizeResponseSerializer(data=response_data)
+        out.is_valid(raise_exception=True)
+        return Response(out.data, status=status.HTTP_200_OK)
 
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):

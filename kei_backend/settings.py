@@ -285,7 +285,7 @@ if USE_S3 and not DEBUG:
             "BACKEND": "kei_backend.storage_backends.MediaStorage",
         },
         "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            "BACKEND": "kei_backend.storage_backends.StaticStorage",
         },
     }
 
@@ -296,12 +296,15 @@ if USE_S3 and not DEBUG:
     AWS_DEFAULT_ACL = 'private'
     AWS_QUERYSTRING_AUTH = True
     
-
-    
-    STATIC_URL = '/static/'
+    STATIC_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.cloud.ru/static/"
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.cloud.ru/media/"
     STATIC_ROOT = BASE_DIR / 'staticfiles'
 else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
     STATIC_URL = '/static/'
     STATIC_ROOT = BASE_DIR / 'staticfiles'
+    
+    STATICFILES_DIRS = [
+        BASE_DIR / 'static',
+    ]

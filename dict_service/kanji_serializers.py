@@ -25,3 +25,16 @@ class KanjiRecognizeResultSerializer(serializers.Serializer):
 
 class KanjiRecognizeResponseSerializer(serializers.Serializer):
     results = KanjiRecognizeResultSerializer(many=True)
+
+
+class KanjiCharacterSerializer(serializers.ModelSerializer):
+    parents = serializers.SerializerMethodField()
+    
+    class Meta:
+        from .models import KanjiCharacter
+        model = KanjiCharacter
+        fields = ['character', 'decomposition_tree', 'parents']
+        
+    def get_parents(self, obj):
+        return list(set(struct.parent.character for struct in obj.compounds.all()))
+

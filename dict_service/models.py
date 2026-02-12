@@ -112,3 +112,17 @@ class UserLearnedEntry(models.Model):
 
     def __str__(self):
         return f"{self.user.username} изучил '{self.entry.term}'"
+
+class KanjiCharacter(models.Model):
+    character = models.CharField(max_length=50, unique=True, db_index=True)
+    decomposition_tree = models.JSONField(default=dict, blank=True, verbose_name="Дерево декомпозиции")
+    
+    def __str__(self):
+        return self.character
+
+class KanjiStructure(models.Model):
+    parent = models.ForeignKey(KanjiCharacter, related_name='components', on_delete=models.CASCADE)
+    child = models.ForeignKey(KanjiCharacter, related_name='compounds', on_delete=models.CASCADE)
+    
+    class Meta:
+        unique_together = ('parent', 'child')

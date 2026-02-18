@@ -28,7 +28,7 @@ class LessonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, LessonPermission]
     pagination_class = LessonPagination
     filter_backends = [filters.SearchFilter]
-    search_fields = ['title',]
+    search_fields = ['title', 'table_of_contents', 'dictionary_entries__term', 'dictionary_entries__reading']
     ordering = ['order', 'id']
 
     def get_serializer_class(self):

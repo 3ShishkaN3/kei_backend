@@ -16,6 +16,8 @@ class Bonus(models.Model):
     bonus_type = models.CharField(max_length=20, choices=BONUS_TYPE_CHOICES, default='video')
     
     video_material = models.ForeignKey(VideoMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='bonuses')
+    # PNG or APNG
+    frame_image = models.FileField(upload_to="avatar_frames/", null=True, blank=True)
         
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

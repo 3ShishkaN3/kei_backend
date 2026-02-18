@@ -1,4 +1,5 @@
 from rest_framework import serializers
+import random
 from rest_framework import serializers
 from .models import (
     TextMaterial, ImageMaterial, AudioMaterial, VideoMaterial, DocumentMaterial,
@@ -56,13 +57,14 @@ class MCQOptionSerializer(serializers.ModelSerializer):
 
 class MatchingPairSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False, allow_null=True)
+    temp_id = serializers.CharField(required=False, write_only=True)
     prompt_image_details = ImageMaterialSerializer(source='prompt_image', read_only=True, allow_null=True)
     prompt_audio_details = AudioMaterialSerializer(source='prompt_audio', read_only=True, allow_null=True)
     
     class Meta:
         model = MatchingPair
         fields = [
-            'id', 'prompt_text',
+            'id', 'temp_id', 'prompt_text',
             'prompt_image', 'prompt_audio',
             'prompt_image_details', 'prompt_audio_details',
             'correct_answer_text', 'order', 'explanation'
@@ -109,6 +111,7 @@ class MatchingPairSerializer(serializers.ModelSerializer):
             material_instance.delete()
 
     def create(self, validated_data):
+        validated_data.pop('temp_id', None)
         prompt_image_file = self.context.get('prompt_image_file')
         prompt_audio_file = self.context.get('prompt_audio_file')
 
@@ -129,7 +132,9 @@ class MatchingPairSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        validated_data.pop('temp_id', None)
         prompt_image_file = self.context.get('prompt_image_file')
+
         prompt_audio_file = self.context.get('prompt_audio_file')
 
         user = self._get_request_user()
@@ -211,7 +216,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Переопределяем поле dictionaries с правильным queryset
         from dict_service.models import DictionarySection
         if 'dictionaries' in self.fields:
             self.fields['dictionaries'] = serializers.PrimaryKeyRelatedField(
@@ -224,7 +228,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         """Преобразует объекты в ID перед валидацией"""
-        # Обрабатываем dictionaries - преобразуем объекты в ID
         if 'dictionaries' in data and isinstance(data['dictionaries'], list):
             normalized_dicts = []
             for item in data['dictionaries']:
@@ -236,7 +239,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
                     normalized_dicts.append(item)
             data['dictionaries'] = normalized_dicts
         
-        # Обрабатываем background_image - преобразуем объект в ID
         if 'background_image' in data:
             bg = data['background_image']
             if isinstance(bg, dict) and 'id' in bg:
@@ -248,7 +250,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Дополнительная валидация и нормализация"""
-        # Нормализуем dictionaries - убеждаемся, что это список ID
         if 'dictionaries' in attrs:
             dictionaries = attrs['dictionaries']
             if dictionaries:
@@ -262,8 +263,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
                         normalized.append(item)
                 attrs['dictionaries'] = normalized
         
-        # НЕ нормализуем background_image здесь - оставляем как есть
-        # Преобразование ID в объект будет в create/update
         return attrs
 
     def get_dictionaries_details(self, obj):
@@ -284,10 +283,9 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
         """Создание с обработкой ManyToMany поля dictionaries и background_image"""
         dictionaries = validated_data.pop('dictionaries', [])
         
-        # Обрабатываем background_image - если это ID, получаем объект
         if 'background_image' in validated_data:
             bg = validated_data['background_image']
-            if bg and not hasattr(bg, 'save'):  # Если это не объект модели
+            if bg and not hasattr(bg, 'save'):
                 from .models import ImageMaterial
                 try:
                     validated_data['background_image'] = ImageMaterial.objects.get(pk=bg) if bg else None
@@ -296,7 +294,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
         
         instance = super().create(validated_data)
         if dictionaries:
-            # Убеждаемся, что это список ID (на случай, если пришли объекты)
             dict_ids = [d.id if hasattr(d, 'id') else d for d in dictionaries if d]
             instance.dictionaries.set(dict_ids)
         return instance
@@ -305,10 +302,9 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
         """Обновление с обработкой ManyToMany поля dictionaries и background_image"""
         dictionaries = validated_data.pop('dictionaries', None)
         
-        # Обрабатываем background_image - если это ID, получаем объект
         if 'background_image' in validated_data:
             bg = validated_data['background_image']
-            if bg and not hasattr(bg, 'save'):  # Если это не объект модели
+            if bg and not hasattr(bg, 'save'):
                 from .models import ImageMaterial
                 try:
                     validated_data['background_image'] = ImageMaterial.objects.get(pk=bg) if bg else None
@@ -317,7 +313,6 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
         
         instance = super().update(instance, validated_data)
         if dictionaries is not None:
-            # Убеждаемся, что это список ID (на случай, если пришли объекты)
             dict_ids = [d.id if hasattr(d, 'id') else d for d in dictionaries if d]
             instance.dictionaries.set(dict_ids)
         return instance
@@ -379,6 +374,52 @@ class TestSerializer(serializers.ModelSerializer):
             val = data['attached_audio']
             if hasattr(val, 'id'): data['attached_audio'] = val.id
         return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+
+        is_staff = False
+        if user and user.is_authenticated:
+             if user.role in ['admin', 'teacher', 'assistant']:
+                 is_staff = True
+             elif user == instance.created_by:
+                 is_staff = True
+        
+        if not is_staff:
+            if 'mcq_options' in representation and representation['mcq_options']:
+                for opt in representation['mcq_options']:
+                    opt.pop('is_correct', None)
+                    opt.pop('explanation', None) 
+            
+            if 'drag_drop_slots' in representation and representation['drag_drop_slots']:
+                for slot in representation['drag_drop_slots']:
+                    slot.pop('correct_answer_text', None)
+                    slot.pop('explanation', None)
+
+            if 'word_order_sentence' in representation and representation['word_order_sentence']:
+                 representation['word_order_sentence'].pop('correct_ordered_texts', None)
+                 representation['word_order_sentence'].pop('explanation', None)
+
+            if 'free_text_question' in representation and representation['free_text_question']:
+                representation['free_text_question'].pop('reference_answer', None)
+                representation['free_text_question'].pop('explanation', None)
+            
+            if 'pronunciation_question' in representation and representation['pronunciation_question']:
+                representation['pronunciation_question'].pop('explanation', None)
+            
+            if 'spelling_question' in representation and representation['spelling_question']:
+                 representation['spelling_question'].pop('explanation', None)
+
+
+        if 'mcq_options' in representation and representation['mcq_options']:
+             random.shuffle(representation['mcq_options'])
+        
+        if 'draggable_options_pool' in representation and representation['draggable_options_pool']:
+             random.shuffle(representation['draggable_options_pool'])
+
+        return representation
 
     def _get_request_user(self):
         request = self.context.get('request')
@@ -446,12 +487,10 @@ class TestSerializer(serializers.ModelSerializer):
         existing_items_map = {item.id: item for item in manager.all()}
         current_ids_in_payload = set()
         
-        # We should try to find the raw data from initial_data to avoid 'object instead of id' errors during double validation
         raw_nested_data = self.initial_data.get(related_manager_name, [])
         raw_items_map = {}
         if isinstance(raw_nested_data, list):
             for raw_item in raw_nested_data:
-                # Use order or id to map
                 r_id = raw_item.get('id')
                 if r_id: raw_items_map[r_id] = raw_item
 
@@ -460,15 +499,12 @@ class TestSerializer(serializers.ModelSerializer):
             item_id = item_data.get('id')
             item_data['order'] = order_counter
 
-            # Use raw data for validation if possible
             validation_data = raw_items_map.get(item_id, item_data) if item_id else item_data
 
             nested_serializer_context = self.context.copy()
             
-            # Identify which file belongs to this slot
-            item_temp_id = item_data.get('id')
+            item_temp_id = item_data.get('temp_id') or item_data.get('id')
             if item_temp_id:
-                # Try finding it in request.FILES by a specific key like 'prompt_image_file_temp_slot_xxx'
                 request_files = self.context.get('request').FILES if 'request' in self.context else {}
                 nested_serializer_context['prompt_image_file'] = request_files.get(f'prompt_image_file_{item_temp_id}')
                 nested_serializer_context['prompt_audio_file'] = request_files.get(f'prompt_audio_file_{item_temp_id}')
@@ -498,11 +534,8 @@ class TestSerializer(serializers.ModelSerializer):
         if nested_data is None and self.partial and related_name_on_test not in self.initial_data: return
         existing_item = getattr(test_instance, related_name_on_test, None)
         if nested_data:
-            # Нормализуем данные перед передачей в сериализатор
-            # Преобразуем объекты в словари/ID для ai_conversation_question
             if related_name_on_test == 'ai_conversation_question':
                 normalized_data = dict(nested_data)
-                # Нормализуем dictionaries
                 if 'dictionaries' in normalized_data:
                     dicts = normalized_data['dictionaries']
                     if dicts:
@@ -515,7 +548,6 @@ class TestSerializer(serializers.ModelSerializer):
                             else:
                                 normalized_dicts.append(item)
                         normalized_data['dictionaries'] = normalized_dicts
-                # Нормализуем background_image
                 if 'background_image' in normalized_data:
                     bg = normalized_data['background_image']
                     if bg and hasattr(bg, 'id'):

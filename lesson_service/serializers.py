@@ -308,6 +308,11 @@ class SectionSerializer(serializers.ModelSerializer):
         return value
 
 
+class SectionTitleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+        fields = ['id', 'title', 'order']
+
 class LessonListSerializer(serializers.ModelSerializer):
     created_by_name = serializers.ReadOnlyField(source='created_by.username')
     section_count = serializers.SerializerMethodField()
@@ -315,13 +320,14 @@ class LessonListSerializer(serializers.ModelSerializer):
     completion_percentage = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
     order = serializers.IntegerField(read_only=True)
+    sections = SectionTitleSerializer(many=True, read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
             'id', 'title', 'cover_image', 'course_id', 'order',
             'created_by_name', 'created_at', 'updated_at', 'section_count',
-            'completion_percentage', 'is_locked', 'table_of_contents'
+            'completion_percentage', 'is_locked', 'table_of_contents', 'sections'
         ]
 
     def get_section_count(self, obj):

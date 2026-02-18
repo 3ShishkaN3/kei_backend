@@ -51,7 +51,6 @@ class Command(BaseCommand):
                     main_char_str = main_g.attrib.get('{http://kanjivg.tagaini.net}element')
                     if main_char_str:
                         all_chars_set.add(main_char_str)
-                        # Build tree and collect pairs for this specific character SVG
                         tree_data, pairs = self.parse_svg_structure(main_g, main_char_str)
                         char_trees[main_char_str] = tree_data
                         all_pairs.update(pairs)
@@ -69,7 +68,6 @@ class Command(BaseCommand):
             self.stdout.write(f'Creating {len(new_chars)} new characters...')
             KanjiCharacter.objects.bulk_create(new_chars, batch_size=500)
 
-        # Refresh map with all characters
         all_chars = KanjiCharacter.objects.only('id', 'character')
         char_obj_map = {c.character: c for c in all_chars}
 
@@ -112,14 +110,12 @@ class Command(BaseCommand):
             if child.tag == '{http://www.w3.org/2000/svg}g':
                 child_char = child.attrib.get('{http://kanjivg.tagaini.net}element')
                 if child_char:
-                    # Avoid redundant nodes (same character or parts)
                     if child_char == char or child_char == current_parent:
                         child_tree, child_pairs = self.parse_svg_structure(child, current_parent)
                         children_data.extend(child_tree['children'])
                         pairs.update(child_pairs)
                     else:
                         child_tree, child_pairs = self.parse_svg_structure(child, child_char)
-                        # Filter CDP placeholder labels or generic "?"
                         if child_char.startswith('CDP-') or child_char == '?':
                             children_data.extend(child_tree['children'])
                         else:
@@ -127,7 +123,6 @@ class Command(BaseCommand):
                             pairs.add((current_parent, child_char))
                         pairs.update(child_pairs)
                 else:
-                    # Group without label, look inside
                     child_tree, child_pairs = self.parse_svg_structure(child, current_parent)
                     children_data.extend(child_tree['children'])
                     pairs.update(child_pairs)

@@ -4,15 +4,16 @@ from rest_framework.response import Response
 from django.db import transaction
 from .models import Bonus, UserBonus
 from .serializers import BonusSerializer, BuyBonusSerializer
+from .permissions import IsAdminOrTeacher
 from progress_service.models import LearningStats
 
 class BonusViewSet(viewsets.ModelViewSet):
     queryset = Bonus.objects.all()
     serializer_class = BonusSerializer
-    
+
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAdminUser()]
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [permissions.IsAuthenticated(), IsAdminOrTeacher()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):

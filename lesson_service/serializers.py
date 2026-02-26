@@ -173,7 +173,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
         final_material_data_payload = {}
         if content_creation_data_from_json_field:
             final_material_data_payload.update(content_creation_data_from_json_field)
-        final_material_data_payload.update(files_for_material)
+        # Note: we don't merge files_for_material here, we pass them separately to the sub-serializer
 
         existing_type = attrs.get('existing_content_type')
         existing_id = attrs.get('existing_content_id')
@@ -210,6 +210,9 @@ class SectionItemSerializer(serializers.ModelSerializer):
             if is_update and self.instance.item_type == item_type:
                 material_instance = self.instance.content_object
             
+            if files_for_material:
+                final_material_data_payload.update(files_for_material)
+
             material_serializer_instance = material_serializer_class(
                 instance=material_instance,
                 data=final_material_data_payload, 
@@ -219,9 +222,11 @@ class SectionItemSerializer(serializers.ModelSerializer):
             try:
                 material_serializer_instance.is_valid(raise_exception=True)
                 attrs['validated_material_data'] = material_serializer_instance.validated_data 
+                attrs['raw_material_data'] = final_material_data_payload
             except serializers.ValidationError as e:
                 raise serializers.ValidationError({'content_material_data': e.detail})
         
+
 
 
         attrs.pop('content_data', None)

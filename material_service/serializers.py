@@ -371,13 +371,17 @@ class TestSerializer(serializers.ModelSerializer):
         }
 
     def to_internal_value(self, data):
-        """Handle already validated objects in nested writes"""
+        """Handle already validated objects in nested writes and field renames"""
         if 'attached_image' in data:
             val = data['attached_image']
             if hasattr(val, 'id'): data['attached_image'] = val.id
         if 'attached_audio' in data:
             val = data['attached_audio']
             if hasattr(val, 'id'): data['attached_audio'] = val.id
+        
+        if 'word_order_sentence' not in data and 'word_order_sentence_details' in data:
+            data['word_order_sentence'] = data['word_order_sentence_details']
+
         return super().to_internal_value(data)
 
     def to_representation(self, instance):
@@ -536,8 +540,12 @@ class TestSerializer(serializers.ModelSerializer):
             manager.filter(id__in=ids_to_delete).delete()
 
     def _handle_nested_one_to_one(self, test_instance, nested_data, related_name_on_test, item_serializer_class):
-        if nested_data is None and self.partial and related_name_on_test not in self.initial_data: return
-        existing_item = getattr(test_instance, related_name_on_test, None)
+        if nested_data is None and self.partial and not any(k in self.initial_data for k in [related_name_on_test, related_name_on_test.replace('_details', '')]): return
+        
+        try:
+            existing_item = getattr(test_instance, related_name_on_test, None)
+        except Exception: # Catch RelatedObjectDoesNotExist (ObjectDoesNotExist)
+            existing_item = None
         if nested_data:
             if related_name_on_test == 'ai_conversation_question':
                 normalized_data = dict(nested_data)
@@ -603,8 +611,17 @@ class TestSerializer(serializers.ModelSerializer):
         
         elif test_type == 'word-order':
             word_order_data = attrs.get('word_order_sentence_details') 
-            if not word_order_data and self.instance and self.instance.word_order_sentence_details: 
-                word_order_data = WordOrderSentenceSerializer(self.instance.word_order_sentence_details).data 
+            
+            # Safe access to OneToOne relation
+            existing_wos = None
+            if self.instance:
+                try:
+                    existing_wos = self.instance.word_order_sentence_details
+                except Exception:
+                    existing_wos = None
+
+            if not word_order_data and existing_wos: 
+                word_order_data = WordOrderSentenceSerializer(existing_wos).data 
             
             if word_order_data: 
                 correct_texts = word_order_data.get('correct_ordered_texts')
@@ -674,7 +691,12 @@ class TestSerializer(serializers.ModelSerializer):
         mcq_options_data = validated_data.pop('mcq_options', None) 
         drag_drop_slots_data = validated_data.pop('drag_drop_slots', None)
         free_text_data = validated_data.pop('free_text_question', None)
+        
+        # Word order might come in under different names due to internal mapping
         word_order_data = validated_data.pop('word_order_sentence_details', None)
+        if word_order_data is None:
+            word_order_data = validated_data.pop('word_order_sentence', None)
+
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
@@ -716,8 +738,15 @@ class TestSerializer(serializers.ModelSerializer):
         
         if free_text_data is not None or ('free_text_question' in self.initial_data and self.initial_data.get('free_text_question') is None):
              self._handle_nested_one_to_one(instance, free_text_data, 'free_text_question', FreeTextQuestionSerializer)
-        if word_order_data is not None or ('word_order_sentence' in self.initial_data and self.initial_data.get('word_order_sentence') is None):
+        
+        # Check both possible keys for word order sentence
+        has_word_order_delete = (
+            ('word_order_sentence' in self.initial_data and self.initial_data.get('word_order_sentence') is None) or
+            ('word_order_sentence_details' in self.initial_data and self.initial_data.get('word_order_sentence_details') is None)
+        )
+        if word_order_data is not None or has_word_order_delete:
             self._handle_nested_one_to_one(instance, word_order_data, 'word_order_sentence_details', WordOrderSentenceSerializer)
+        
         if pronunciation_data is not None or ('pronunciation_question' in self.initial_data and self.initial_data.get('pronunciation_question') is None):
             self._handle_nested_one_to_one(instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         if spelling_data is not None or ('spelling_question' in self.initial_data and self.initial_data.get('spelling_question') is None):

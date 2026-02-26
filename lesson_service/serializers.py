@@ -205,7 +205,17 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
         if has_new_content_data:
             material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
-            material_serializer_instance = material_serializer_class(data=final_material_data_payload, context=self.context)
+            
+            material_instance = None
+            if is_update and self.instance.item_type == item_type:
+                material_instance = self.instance.content_object
+            
+            material_serializer_instance = material_serializer_class(
+                instance=material_instance,
+                data=final_material_data_payload, 
+                partial=True,
+                context=self.context
+            )
             try:
                 material_serializer_instance.is_valid(raise_exception=True)
                 attrs['validated_material_data'] = material_serializer_instance.validated_data 

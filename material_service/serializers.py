@@ -208,7 +208,12 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AiConversationQuestion
-        fields = ['id', 'background_image', 'background_image_details', 'context', 'personality', 'goodbye_condition', 'dictionaries', 'dictionaries_details']
+        fields = [
+            'id', 'background_image', 'background_image_details', 
+            'context', 'personality', 'speaking_style', 
+            'difficulty_level', 'assessment_criteria', 'key_vocabulary',
+            'goodbye_condition', 'dictionaries', 'dictionaries_details'
+        ]
         extra_kwargs = {
             'test': {'read_only': True, 'required': False},
             'background_image': {'required': False, 'allow_null': True}
@@ -623,7 +628,7 @@ class TestSerializer(serializers.ModelSerializer):
         mcq_options_data = validated_data.pop('mcq_options', [])
         drag_drop_slots_data = validated_data.pop('drag_drop_slots', [])
         free_text_data = validated_data.pop('free_text_question', None)
-        word_order_data = validated_data.pop('word_order_sentence', None)
+        word_order_data = validated_data.pop('word_order_sentence_details', None)
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
@@ -669,7 +674,7 @@ class TestSerializer(serializers.ModelSerializer):
         mcq_options_data = validated_data.pop('mcq_options', None) 
         drag_drop_slots_data = validated_data.pop('drag_drop_slots', None)
         free_text_data = validated_data.pop('free_text_question', None)
-        word_order_data = validated_data.pop('word_order_sentence', None)
+        word_order_data = validated_data.pop('word_order_sentence_details', None)
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)

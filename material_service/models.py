@@ -379,6 +379,27 @@ class AiConversationQuestion(models.Model):
         null=True, 
         verbose_name="Личность/Характер модели (Опишите от себя)"
     )
+    speaking_style = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Стиль речи (например, формальный, вежливый, сленг)"
+    )
+    difficulty_level = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name="Уровень сложности (например, N5, Beginner)"
+    )
+    assessment_criteria = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Критерии оценки (как ИИ должен оценивать ученика)"
+    )
+    key_vocabulary = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Ключевые слова/фразы (которые учитель хочет услышать)"
+    )
     goodbye_condition = models.TextField(
         blank=True, 
         null=True, 

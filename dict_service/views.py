@@ -259,6 +259,20 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
 class KanjiRecognitionViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='static-url')
+    def static_url(self, request):
+        file_path = request.query_params.get('path', '').lstrip('/')
+        if not file_path:
+            return Response({'detail': 'path is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if '..' in file_path or file_path.startswith('\\'):
+            return Response({'detail': 'invalid path'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not staticfiles_storage.exists(file_path):
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({'url': staticfiles_storage.url(file_path)})
+
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def recognize(self, request):
         serializer = KanjiRecognizeRequestSerializer(data=request.data)

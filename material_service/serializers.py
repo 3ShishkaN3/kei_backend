@@ -7,7 +7,8 @@ from .models import (
     PronunciationQuestion, SpellingQuestion, AiConversationQuestion,
     TestSubmission, MCQSubmissionAnswer, FreeTextSubmissionAnswer, WordOrderSubmissionAnswer,
     MatchingSubmissionAnswer, PronunciationSubmissionAnswer, SpellingSubmissionAnswer,
-    AiConversationSubmissionAnswer
+    AiConversationSubmissionAnswer,
+    KanjiTracingItem, KanjiTracingSubmissionAnswer
 )
 
 from django.db import transaction
@@ -324,6 +325,40 @@ class AiConversationQuestionSerializer(serializers.ModelSerializer):
 
 
 
+class KanjiTracingItemSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    temp_id = serializers.CharField(required=False, write_only=True)
+    class Meta:
+        model = KanjiTracingItem
+        fields = ['id', 'temp_id', 'kanji', 'custom_image', 'notes', 'order']
+        extra_kwargs = {
+            'test': {'read_only': True, 'required': False},
+            'order': {'required': False},
+        }
+
+    def to_internal_value(self, data):
+        """Убираем custom_image из data, если это blob/http URL — файл приходит через context"""
+        data = dict(data)
+        cv = data.get('custom_image')
+        if cv is not None and not hasattr(cv, 'read'):
+            data.pop('custom_image', None)
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if 'custom_image' in self.context and self.context['custom_image'] is not None:
+            attrs['custom_image'] = self.context['custom_image']
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('temp_id', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('temp_id', None)
+        return super().update(instance, validated_data)
+
+
 class TestSerializer(serializers.ModelSerializer):
     mcq_options = MCQOptionSerializer(many=True, required=False, allow_null=True)
     free_text_question = FreeTextQuestionSerializer(required=False, allow_null=True)
@@ -332,6 +367,7 @@ class TestSerializer(serializers.ModelSerializer):
     spelling_question = SpellingQuestionSerializer(required=False, allow_null=True)
     ai_conversation_question = AiConversationQuestionSerializer(required=False, allow_null=True)
     drag_drop_slots = MatchingPairSerializer(many=True, required=False, allow_null=True)
+    kanji_tracing_items = KanjiTracingItemSerializer(many=True, required=False, allow_null=True)
 
     attached_image_details = ImageMaterialSerializer(source='attached_image', read_only=True, allow_null=True)
     attached_audio_details = AudioMaterialSerializer(source='attached_audio', read_only=True, allow_null=True)
@@ -358,6 +394,7 @@ class TestSerializer(serializers.ModelSerializer):
             'pronunciation_question', 
             'spelling_question',
             'ai_conversation_question',
+            'kanji_tracing_items',
             'attached_image_file', 
             'attached_audio_file',
         ]
@@ -517,6 +554,7 @@ class TestSerializer(serializers.ModelSerializer):
                 request_files = self.context.get('request').FILES if 'request' in self.context else {}
                 nested_serializer_context['prompt_image_file'] = request_files.get(f'prompt_image_file_{item_temp_id}')
                 nested_serializer_context['prompt_audio_file'] = request_files.get(f'prompt_audio_file_{item_temp_id}')
+                nested_serializer_context['custom_image'] = request_files.get(f'custom_image_{item_temp_id}')
             
             if item_id and item_id in existing_items_map:
                 item_serializer = item_serializer_class(existing_items_map[item_id], data=validation_data, partial=True, context=nested_serializer_context)
@@ -612,7 +650,6 @@ class TestSerializer(serializers.ModelSerializer):
         elif test_type == 'word-order':
             word_order_data = attrs.get('word_order_sentence_details') 
             
-            # Safe access to OneToOne relation
             existing_wos = None
             if self.instance:
                 try:
@@ -649,6 +686,7 @@ class TestSerializer(serializers.ModelSerializer):
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
+        kanji_tracing_data = validated_data.pop('kanji_tracing_items', [])
 
         request_files = self.context.get('request').FILES if 'request' in self.context else {}
         ai_bg_file = request_files.get('ai_background_image')
@@ -683,6 +721,7 @@ class TestSerializer(serializers.ModelSerializer):
         self._handle_nested_one_to_one(test_instance, pronunciation_data, 'pronunciation_question', PronunciationQuestionSerializer)
         self._handle_nested_one_to_one(test_instance, spelling_data, 'spelling_question', SpellingQuestionSerializer)
         self._handle_nested_one_to_one(test_instance, ai_conversation_data, 'ai_conversation_question', AiConversationQuestionSerializer)
+        self._handle_nested_many_to_many(test_instance, kanji_tracing_data, 'kanji_tracing_items', KanjiTracingItemSerializer)
 
         return test_instance
 
@@ -692,7 +731,6 @@ class TestSerializer(serializers.ModelSerializer):
         drag_drop_slots_data = validated_data.pop('drag_drop_slots', None)
         free_text_data = validated_data.pop('free_text_question', None)
         
-        # Word order might come in under different names due to internal mapping
         word_order_data = validated_data.pop('word_order_sentence_details', None)
         if word_order_data is None:
             word_order_data = validated_data.pop('word_order_sentence', None)
@@ -700,6 +738,7 @@ class TestSerializer(serializers.ModelSerializer):
         pronunciation_data = validated_data.pop('pronunciation_question', None)
         spelling_data = validated_data.pop('spelling_question', None)
         ai_conversation_data = validated_data.pop('ai_conversation_question', None)
+        kanji_tracing_data = validated_data.pop('kanji_tracing_items', None)
 
         request_files = self.context.get('request').FILES if 'request' in self.context else {}
         ai_bg_file = request_files.get('ai_background_image')
@@ -735,11 +774,12 @@ class TestSerializer(serializers.ModelSerializer):
             self._handle_nested_many_to_many(instance, mcq_options_data, 'mcq_options', MCQOptionSerializer)
         if drag_drop_slots_data is not None:
             self._handle_nested_many_to_many(instance, drag_drop_slots_data, 'drag_drop_slots', MatchingPairSerializer, slot_image_files=slot_image_files, slot_audio_files=slot_audio_files)
+        if kanji_tracing_data is not None:
+            self._handle_nested_many_to_many(instance, kanji_tracing_data, 'kanji_tracing_items', KanjiTracingItemSerializer)
         
         if free_text_data is not None or ('free_text_question' in self.initial_data and self.initial_data.get('free_text_question') is None):
              self._handle_nested_one_to_one(instance, free_text_data, 'free_text_question', FreeTextQuestionSerializer)
         
-        # Check both possible keys for word order sentence
         has_word_order_delete = (
             ('word_order_sentence' in self.initial_data and self.initial_data.get('word_order_sentence') is None) or
             ('word_order_sentence_details' in self.initial_data and self.initial_data.get('word_order_sentence_details') is None)
@@ -855,6 +895,14 @@ class SpellingSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
         model = SpellingSubmissionAnswer
         fields = ['submitted_image_file']
 
+class KanjiTracingSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
+    submitted_image_file = serializers.ImageField(read_only=True)
+
+    class Meta:
+        model = KanjiTracingSubmissionAnswer
+        fields = ['submitted_image_file']
+
+
 class AiConversationSubmissionAnswerOutputSerializer(serializers.ModelSerializer):
     class Meta:
         model = AiConversationSubmissionAnswer
@@ -871,6 +919,7 @@ class TestSubmissionDetailSerializer(serializers.ModelSerializer):
     pronunciation_answer = PronunciationSubmissionAnswerOutputSerializer(read_only=True)
     spelling_answer = SpellingSubmissionAnswerOutputSerializer(read_only=True)
     ai_conversation_answer = AiConversationSubmissionAnswerOutputSerializer(read_only=True)
+    kanji_tracing_answer = KanjiTracingSubmissionAnswerOutputSerializer(read_only=True)
 
     class Meta:
         model = TestSubmission
@@ -879,14 +928,14 @@ class TestSubmissionDetailSerializer(serializers.ModelSerializer):
             'section_item', 'submitted_at', 'status', 'score', 'feedback',
             'mcq_answers', 'free_text_answer', 'word_order_answer',
             'drag_drop_answers', 'pronunciation_answer', 'spelling_answer',
-            'ai_conversation_answer'
+            'ai_conversation_answer', 'kanji_tracing_answer'
         ]
         read_only_fields = (
             'id', 'test', 'test_details', 'student', 'student_details',
             'section_item', 'submitted_at', 'status', 'score', 'feedback',
             'mcq_answers', 'free_text_answer', 'word_order_answer',
             'drag_drop_answers', 'pronunciation_answer', 'spelling_answer',
-            'ai_conversation_answer'
+            'ai_conversation_answer', 'kanji_tracing_answer'
         )
 
 class TestSubmissionListSerializer(serializers.ModelSerializer):
@@ -953,7 +1002,7 @@ class TestSubmissionInputSerializer(serializers.Serializer):
             else:
                  validation_errors = answer_validator_serializer.errors
         
-        elif test_type in ['pronunciation', 'spelling']:
+        elif test_type in ['pronunciation', 'spelling', 'kanji-tracing']:
             pass
         
         else:
@@ -972,6 +1021,6 @@ class TestSubmissionInputSerializer(serializers.Serializer):
         if test:
             if test.test_type == 'pronunciation' and 'submitted_audio_file' not in request_files:
                  raise serializers.ValidationError({"submitted_audio_file": "Для теста на произношение необходим аудио файл."})
-            if test.test_type == 'spelling' and 'submitted_image_file' not in request_files:
-                 raise serializers.ValidationError({"submitted_image_file": "Для теста на правописание необходимо изображение."})
+            if test.test_type in ['spelling', 'kanji-tracing'] and 'submitted_image_file' not in request_files:
+                 raise serializers.ValidationError({"submitted_image_file": "Для данного теста необходимо изображение."})
         return attrs

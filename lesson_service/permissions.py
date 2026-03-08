@@ -27,6 +27,7 @@ class IsCourseStaffOrAdmin(permissions.BasePermission):
         if hasattr(request.user, 'role') and request.user.role == 'admin':
             return True
 
+        course = self._get_course_from_obj(obj)
         if not course:
             print(f"IsCourseStaffOrAdmin: Could not determine course from object: {type(obj)}")
             return False

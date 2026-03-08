@@ -173,7 +173,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
         final_material_data_payload = {}
         if content_creation_data_from_json_field:
             final_material_data_payload.update(content_creation_data_from_json_field)
-        # Note: we don't merge files_for_material here, we pass them separately to the sub-serializer
 
         existing_type = attrs.get('existing_content_type')
         existing_id = attrs.get('existing_content_id')
@@ -236,11 +235,8 @@ class SectionItemSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        
-
-        validated_data.pop('validated_material_data', None) 
-        
-
+        validated_data.pop('validated_material_data', None)
+        validated_data.pop('raw_material_data', None)
         validated_data.pop('content_data', None)
         validated_data.pop('existing_content_type', None)
         validated_data.pop('existing_content_id', None)
@@ -253,6 +249,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         validated_data.pop('validated_material_data', None)
+        validated_data.pop('raw_material_data', None)
         validated_data.pop('content_data', None)
         validated_data.pop('existing_content_type', None)
         validated_data.pop('existing_content_id', None)

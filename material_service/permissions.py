@@ -12,7 +12,34 @@ class IsAdminOrStaffWriteOrReadOnly(permissions.BasePermission):
         return request.user.role in ['admin', 'teacher', 'assistant']
 
     def has_object_permission(self, request, view, obj):
-        return self.has_permission(request, view)
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        
+        if request.user.role in ['admin', 'teacher']:
+            return True
+        
+        if request.user.role == 'assistant':
+            if hasattr(obj, 'created_by') and obj.created_by == request.user:
+                return True
+            
+            from lesson_service.models import SectionItem
+            from django.contrib.contenttypes.models import ContentType
+            from course_service.models import CourseAssistant
+            
+            content_type = ContentType.objects.get_for_model(obj.__class__)
+            assisting_course_ids = CourseAssistant.objects.filter(assistant=request.user).values_list('course_id', flat=True)
+            
+            is_used_in_assisting_course = SectionItem.objects.filter(
+                content_type=content_type, 
+                object_id=obj.id,
+                section__lesson__course_id__in=assisting_course_ids
+            ).exists()
+            
+            return is_used_in_assisting_course
+            
+        return False
 
 
 class CanSubmitTest(permissions.BasePermission):

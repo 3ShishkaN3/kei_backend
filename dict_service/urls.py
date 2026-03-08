@@ -10,6 +10,7 @@ sections_router = routers.NestedSimpleRouter(router, r'', lookup='section')
 sections_router.register(r'entries', DictionaryEntryViewSet, basename='section-entries')
 
 urlpatterns = [
+    path('kanji/static-url/', KanjiRecognitionViewSet.as_view({'get': 'static_url'})),
     path('', include(router.urls)),
     path('', include(sections_router.urls)),
 ]

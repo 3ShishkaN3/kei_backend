@@ -149,6 +149,9 @@ class LessonViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
     def reorder_lessons(self, request, course_pk=None):
         course = get_object_or_404(Course, pk=course_pk)
+        
+        if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, course):
+             self.permission_denied(self.request, message="У вас нет прав на изменение порядка уроков в этом курсе.")
 
         data = request.data
         if not isinstance(data, list):
@@ -308,13 +311,16 @@ class SectionViewSet(viewsets.ModelViewSet):
             else:
                 serializer = SectionCompletionSerializer(completion, context={'request': request})
                 return Response(
-                    {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
+                {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
                     status=status.HTTP_200_OK
                 )
                 
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
     def reorder_sections(self, request, lesson_pk=None, course_pk=None):
         lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
+        
+        if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, lesson.course):
+             self.permission_denied(self.request, message="У вас нет прав на изменение порядка разделов в этом уроке.")
 
         data = request.data
         if not isinstance(data, list):

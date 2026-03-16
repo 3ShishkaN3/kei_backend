@@ -221,6 +221,12 @@ LOGGING = {
             "style": "{",
         },
     },
+    "filters": {
+        "suppress_request_aborted": {
+            "()": "django.utils.log.CallbackFilter",
+            "callback": lambda record: "RequestAborted" not in record.getMessage() and "never retrieved" not in record.getMessage(),
+        }
+    },
     "handlers": {
         "file_auth": {
             "level": "INFO",
@@ -237,6 +243,7 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "detailed",
+            "filters": ["suppress_request_aborted"],
         },
     },
     "loggers": {
@@ -253,6 +260,11 @@ LOGGING = {
         "kei_backend.utils": {
             "handlers": ["console"],
             "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
             "propagate": False,
         },
     },

@@ -194,8 +194,11 @@ class WordOrderSentenceSerializer(serializers.ModelSerializer):
 class PronunciationQuestionSerializer(serializers.ModelSerializer):
      class Meta:
         model = PronunciationQuestion
-        fields = ['id', 'text_to_pronounce', 'explanation']
-        extra_kwargs = {'test': {'read_only': True, 'required': False}}
+        fields = ['id', 'text_to_pronounce', 'explanation', 'reference_audio_file', 'transcript']
+        extra_kwargs = {
+            'test': {'read_only': True, 'required': False},
+            'reference_audio_file': {'required': False, 'allow_null': True}
+        }
 
 class SpellingQuestionSerializer(serializers.ModelSerializer):
      class Meta:
@@ -698,6 +701,10 @@ class TestSerializer(serializers.ModelSerializer):
              )
              ai_conversation_data['background_image'] = created_bg_img.id
 
+        pron_audio_file = request_files.get('pronunciation_reference_audio')
+        if pron_audio_file and pronunciation_data is not None:
+            pronunciation_data['reference_audio_file'] = pron_audio_file
+
         image_file = validated_data.pop('attached_image_file', None)
         audio_file = validated_data.pop('attached_audio_file', None)
         
@@ -749,6 +756,10 @@ class TestSerializer(serializers.ModelSerializer):
                  created_by=self._get_request_user()
              )
              ai_conversation_data['background_image'] = created_bg_img.id
+
+        pron_audio_file = request_files.get('pronunciation_reference_audio')
+        if pron_audio_file and pronunciation_data is not None:
+            pronunciation_data['reference_audio_file'] = pron_audio_file
 
         image_file_from_request = validated_data.pop('attached_image_file', None)
         audio_file_from_request = validated_data.pop('attached_audio_file', None)
@@ -807,7 +818,8 @@ class MCQSubmissionAnswerSerializer(BaseSubmissionAnswerSerializer):
     selected_option_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=True,
-        min_length=1,
+        min_length=0,
+        allow_empty=True,
         help_text="Список ID выбранных вариантов ответа (MCQOption)."
     )
 
@@ -818,7 +830,8 @@ class WordOrderSubmissionAnswerSerializer(BaseSubmissionAnswerSerializer):
     submitted_order_words = serializers.ListField(
         child=serializers.CharField(),
         required=True,
-        min_length=1,
+        min_length=0,
+        allow_empty=True,
         help_text="Список слов в порядке, указанном пользователем."
     )
 
@@ -966,8 +979,9 @@ class TestSubmissionInputSerializer(serializers.Serializer):
         if not test: raise serializers.ValidationError("Тест не определен для валидации ответов.")
         test_type = test.test_type
         
-        answer_validator_serializer = None
         validation_errors = {}
+        if isinstance(answers_data_from_json_field, dict) and 'answers' in answers_data_from_json_field and len(answers_data_from_json_field) == 1:
+            answers_data_from_json_field = answers_data_from_json_field['answers']
 
         if test_type in ['mcq-single', 'mcq-multi']:
             answer_validator_serializer = MCQSubmissionAnswerSerializer(data=answers_data_from_json_field)
@@ -990,10 +1004,13 @@ class TestSubmissionInputSerializer(serializers.Serializer):
             if not answer_validator_serializer.is_valid(): validation_errors = answer_validator_serializer.errors
         
         elif test_type == 'drag-and-drop':
+            if isinstance(answers_data_from_json_field, list):
+                answers_data_from_json_field = {'answers': answers_data_from_json_field}
+            
             answer_validator_serializer = DragDropSubmissionAnswerInputSerializer(data=answers_data_from_json_field)
             if answer_validator_serializer.is_valid():
                 valid_slot_ids = set(test.drag_drop_slots.values_list('id', flat=True))
-                options_pool = set(test.draggable_options_pool)
+                options_pool = set(test.draggable_options_pool or [])
                 for ans_item in answer_validator_serializer.validated_data.get('answers', []):
                     if ans_item['slot_id'] not in valid_slot_ids:
                         validation_errors.setdefault('answers', []).append(f"Слот ID {ans_item['slot_id']} недействителен.")
@@ -1009,7 +1026,9 @@ class TestSubmissionInputSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"Неизвестный тип теста для валидации ответов: {test_type}")
 
         if validation_errors:
-            raise serializers.ValidationError({"answers": validation_errors})
+            # Instead of wrapping in {"answers": ...}, we just raise.
+            # DRF will automatically associate it with the 'answers' field.
+            raise serializers.ValidationError(validation_errors)
 
         return answers_data_from_json_field 
 

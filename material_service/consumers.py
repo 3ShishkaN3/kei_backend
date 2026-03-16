@@ -58,24 +58,41 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         context = self.question_config.context
         goodbye = self.question_config.goodbye_condition or "Попрощайся и закончи разговор."
         
+        style = self.question_config.speaking_style or "Вежливый и дружелюбный (такие как desu/masu)."
+        level = self.question_config.difficulty_level or "Средний"
+        criteria = self.question_config.assessment_criteria or "Оценивай общую способность ученика поддерживать диалог, правильность использования грамматики и соответствие контексту."
+        key_vocab = self.question_config.key_vocabulary
+        
         dictionary_words = await self.get_dictionary_words(self.question_config)
         words_instruction = ""
-        if dictionary_words:
-            words_list = ", ".join(dictionary_words)
+        if dictionary_words or key_vocab:
+            combined_words = []
+            if dictionary_words: combined_words.extend(dictionary_words)
+            if key_vocab: combined_words.append(key_vocab)
+            
+            words_list = ", ".join(combined_words)
             words_instruction = f"""
         
         ВАЖНО - СЛОВА ДЛЯ ИСПОЛЬЗОВАНИЯ В РАЗГОВОРЕ:
-        Ты должна использовать следующие слова из словаря при общении с учеником: {words_list}
+        Ты должна использовать следующие слова/фразы при общении с учеником: {words_list}
         Старайся естественно вплетать эти слова в диалог, чтобы ученик мог их услышать и запомнить.
-        Используй эти слова в контексте разговора, но не перегружай диалог - используй их естественно.
+        Используй их в контексте разговора, но не перегружай диалог.
         """
         
         self.system_instruction = f"""
         Ты — {personality}. Твой характер: аниме-тян, преподаватель японского языка.
+        Стиль твоей речи (Tone/Style): {style}
+        Уровень сложности диалога: {level}
+        
         ОБЯЗАТЕЛЬНОЕ УСЛОВИЕ: Твои ответы должны быть СТРОГО на японском языке. 
         Не используй русский или английский в аудио-ответах, только японский.
+        
         КОНТЕКСТ РАЗГОВОРА: {context}
-        КОНЕЦ ДИАЛОГА: {goodbye}{words_instruction}
+        КОНЕЦ ДИАЛОГА: {goodbye}
+        {words_instruction}
+        
+        КРИТЕРИИ ОЦЕНКИ (ВАЖНО): 
+        {criteria}
         
         КРИТИЧЕСКИ ВАЖНО: У тебя есть доступ к инструменту evaluate_conversation для оценки диалога.
         
@@ -89,22 +106,21 @@ class AiConversationConsumer(AsyncWebsocketConsumer):
         - НЕ оценивай транскрипцию текста - она может содержать ошибки распознавания
         - Оценивай произношение, интонацию, беглость речи на основе АУДИО
         - Оценивай грамматику и лексику на основе того, что ты СЛЫШИШЬ в аудио
-        - Транскрипция используется только для понимания содержания, но оценка должна быть по АУДИО
         
-        ВНИМАНИЕ: При вызове evaluate_conversation ты должна передать ОБЯЗАТЕЛЬНО все параметры:
-        - grammar_score (0-100) - оценка грамматики на основе услышанного аудио
-        - vocabulary_score (0-100) - оценка лексики на основе услышанного аудио
-        - fluency_score (0-100) - оценка беглости речи на основе аудио (паузы, темп)
-        - pronunciation_score (0-100) - оценка произношения ТОЛЬКО на основе аудио (интонация, акценты, четкость)
-        - relevance_score (0-100) - оценка релевантности ответов контексту
-        - conversation_flow (0-100) - оценка течения разговора
+        ВНИМАНИЕ: При вызове evaluate_conversation учитывай указанные выше КРИТЕРИИ ОЦЕНКИ.
+        Ты должна передать ОБЯЗАТЕЛЬНО все параметры:
+        - grammar_score (0-100) - оценка грамматики
+        - vocabulary_score (0-100) - оценка лексики
+        - fluency_score (0-100) - оценка беглости (паузы, темп)
+        - pronunciation_score (0-100) - оценка произношения (акценты, четкость), транскрипцию НЕ УЧИТЫВАЙ
+        - relevance_score (0-100) - релевантность ответов
+        - conversation_flow (0-100) - течение разговора
         - strengths - массив сильных сторон (минимум 2 пункта)
         - weaknesses - массив слабых сторон (минимум 2 пункта)
         - recommendations - массив рекомендаций (минимум 2 пункта)
-        - detailed_feedback - подробный отзыв на русском языке
+        - detailed_feedback - подробный развернутый отзыв на русском языке, анализирующий прогресс ученика относительно целей задания.
         
-        ВСЕ параметры обязательны для заполнения!
-        После вызова evaluate_conversation разговор завершен.
+        ВСЕ параметры обязательны! Разговор считается завершенным после вызова этой функции.
         """
         
         await self.accept()

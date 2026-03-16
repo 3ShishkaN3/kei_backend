@@ -1,5 +1,10 @@
 from django.shortcuts import get_object_or_404
 from django.db.models import Exists, OuterRef
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.contrib.staticfiles import finders
+from django.conf import settings
+from django.http import HttpResponse, Http404
+import grpc
 from rest_framework import viewsets, status, filters, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -7,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import serializers
 
-from .models import DictionarySection, DictionaryEntry, UserLearnedEntry
+from .models import DictionarySection, DictionaryEntry, UserLearnedEntry, KanjiCharacter
 from .serializers import (
     DictionarySectionSerializer, DictionaryEntrySerializer, UserLearnedEntrySerializer,
     get_user_show_learned_setting
@@ -21,6 +26,12 @@ from lesson_service.models import Lesson
 
 from django.utils import timezone
 from kei_backend.utils import send_to_kafka
+
+from .kanji_recognition_service import KanjiRecognitionService
+from .kanji_serializers import (
+    KanjiRecognizeRequestSerializer, KanjiRecognizeResponseSerializer,
+    KanjiCharacterSerializer
+)
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 20
@@ -243,6 +254,116 @@ class DictionaryEntryViewSet(viewsets.ModelViewSet):
             "section_id": section.id,
             "section_title": section.title
         })
+
+
+class KanjiRecognitionViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='static-url')
+    def static_url(self, request):
+        file_path = request.query_params.get('path', '').lstrip('/')
+        if not file_path:
+            return Response({'detail': 'path is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if '..' in file_path or file_path.startswith('\\'):
+            return Response({'detail': 'invalid path'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not staticfiles_storage.exists(file_path):
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({'url': staticfiles_storage.url(file_path)})
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def recognize(self, request):
+        serializer = KanjiRecognizeRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        strokes = serializer.validated_data['strokes']
+        top_n = serializer.validated_data.get('top_n', 5)
+
+        service = KanjiRecognitionService()
+        try:
+            results = service.recognize(strokes=strokes, top_n=top_n)
+        except grpc.RpcError as e:
+            return Response(
+                {
+                    'detail': f'gRPC error: {e.code().name}',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'detail': f'Failed to recognize kanji: {e}',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response_data = {'results': results}
+        out = KanjiRecognizeResponseSerializer(data=response_data)
+        out.is_valid(raise_exception=True)
+        return Response(out.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='structure/(?P<char>.+)')
+    def structure(self, request, char=None):
+        if not char:
+            return Response({"detail": "Character is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            obj = KanjiCharacter.objects.get(character=char)
+        except KanjiCharacter.DoesNotExist:
+            return Response({"detail": f"Kanji structure for '{char}' not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = KanjiCharacterSerializer(obj)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """
+        Serve Kanji SVG file from backend storage (local or S3).
+        PK is the hex code of the kanji (e.g., '0f9b4').
+        """
+        kanji_hex = pk.lower()
+        if not kanji_hex.isalnum() or len(kanji_hex) > 6:
+            return Response(
+                {'detail': 'Invalid kanji code format.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        file_path = f"kanji/{kanji_hex}.svg"
+        
+        try:
+            content = None
+            
+            if settings.DEBUG:
+                absolute_path = finders.find(file_path)
+                if not absolute_path:
+                    if staticfiles_storage.exists(file_path):
+                        with staticfiles_storage.open(file_path) as f:
+                            content = f.read()
+                    else:
+                        raise Http404("Kanji SVG not found.")
+                else:
+                    with open(absolute_path, 'rb') as f:
+                        content = f.read()
+            else:
+                if not staticfiles_storage.exists(file_path):
+                    raise Http404("Kanji SVG not found.")
+
+                with staticfiles_storage.open(file_path) as f:
+                    content = f.read()
+                
+            return HttpResponse(content, content_type="image/svg+xml")
+            
+        except Exception as e:
+            if isinstance(e, Http404):
+                raise e
+            if isinstance(e, FileNotFoundError):
+                 raise Http404("Kanji SVG not found.")
+            
+            return Response(
+                {'detail': f'Error retrieving kanji file: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class PrimaryLessonEntriesViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):

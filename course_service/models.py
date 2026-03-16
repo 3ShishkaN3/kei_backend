@@ -6,6 +6,7 @@ class Course(models.Model):
         ('draft', 'Черновик'),
         ('published', 'Опубликован'),
         ('free', 'Бесплатно'),
+        ('individual', 'Индивидуальный'),
     )
     
     title = models.CharField(max_length=255)

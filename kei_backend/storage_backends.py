@@ -8,6 +8,7 @@ class MediaStorage(S3Boto3Storage):
     file_overwrite = False
     querystring_auth = True
     querystring_expire = 3600
+    addressing_style = 'path'
     
     def __init__(self, *args, **kwargs):
         kwargs['bucket_name'] = settings.AWS_STORAGE_BUCKET_NAME
@@ -20,7 +21,9 @@ class StaticStorage(S3Boto3Storage):
     """Custom S3 storage for static files"""
     location = 'static'
     default_acl = 'public-read'
-    custom_domain = f"{settings.AWS_STORAGE_BUCKET_NAME}.s3.cloud.ru"
+    querystring_auth = True
+    querystring_expire = 3600
+    addressing_style = 'path'
     
     def __init__(self, *args, **kwargs):
         kwargs['bucket_name'] = settings.AWS_STORAGE_BUCKET_NAME

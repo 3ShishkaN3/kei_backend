@@ -29,7 +29,16 @@ def grade_free_text_submission(submission_id):
             
             test = submission.test
             task_text = test.title # Текст задания
-            correct_answer = test.free_text_question.reference_answer # Эталонный ответ
+            
+            ftq = getattr(test, 'free_text_question', None)
+            if not ftq:
+                submission.status = 'auto_failed'
+                submission.feedback = "Ошибка платформы: настройки теста с текстовым вопросом отсутствуют."
+                submission.save(update_fields=['status', 'feedback'])
+                logger.error(f"Test {test.id} (free-text) has no free_text_question object.")
+                return
+
+            correct_answer = ftq.reference_answer # Эталонный ответ
 
             llm_service = LLMGradingService()
             grading_result = llm_service.grade_answer(

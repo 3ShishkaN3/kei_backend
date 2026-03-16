@@ -52,3 +52,4 @@ def send_confirmation_email(email, code, purpose):
         logger.info(f"Письмо успешно отправлено на {email} для {purpose}")
     except Exception as e:
         logger.error(f"Ошибка при отправке письма на {email} для {purpose}: {str(e)}")
+        raise e

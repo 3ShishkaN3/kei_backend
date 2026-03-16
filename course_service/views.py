@@ -35,42 +35,44 @@ class CourseViewSet(viewsets.ModelViewSet):
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
         elif user.is_authenticated and user.role == 'assistant':
-            has_enrollments = CourseEnrollment.objects.filter(
+            # Ассистенты видят курсы, в которых они помогают
+            assisting_course_ids = CourseAssistant.objects.filter(
+                assistant=user
+            ).values_list('course_id', flat=True)
+            
+            # А также курсы, на которые они записаны как ученики
+            enrolled_course_ids = CourseEnrollment.objects.filter(
                 student=user, 
                 status='active'
-            ).exists()
+            ).values_list('course_id', flat=True)
             
-            if has_enrollments:
-                enrolled_course_ids = Course.objects.filter(
-                    enrollments__student=user, 
-                    enrollments__status='active'
-                ).values_list('id', flat=True)
-                
-                queryset = Course.objects.filter(
-                    Q(id__in=enrolled_course_ids) |
-                    Q(status='free') |
-                    Q(status='published')
-                ).distinct()
-                
-                queryset = queryset.annotate(
-                    is_enrolled=Case(
-                        When(id__in=enrolled_course_ids, then=1),
-                        default=0,
-                        output_field=IntegerField(),
-                    ),
-                    course_priority=Case(
-                        When(status='published', then=1),
-                        When(status='free', then=2),
-                        default=3,
-                        output_field=IntegerField(),
-                    )
+            queryset = Course.objects.filter(
+                Q(id__in=assisting_course_ids) |
+                Q(id__in=enrolled_course_ids) |
+                Q(status='free') |
+                Q(status='published')
+            ).distinct()
+            
+            queryset = queryset.annotate(
+                is_assisting=Case(
+                    When(id__in=assisting_course_ids, then=1),
+                    default=0,
+                    output_field=IntegerField(),
+                ),
+                is_enrolled=Case(
+                    When(id__in=enrolled_course_ids, then=1),
+                    default=0,
+                    output_field=IntegerField(),
+                ),
+                course_priority=Case(
+                    When(status='published', then=1),
+                    When(status='free', then=2),
+                    default=3,
+                    output_field=IntegerField(),
                 )
-                
-                queryset = queryset.order_by('is_enrolled', 'course_priority', '-created_at')
-            else:
-                status_filter = self.request.query_params.get('status')
-                if status_filter:
-                    queryset = queryset.filter(status=status_filter)
+            )
+            
+            queryset = queryset.order_by('-is_assisting', '-is_enrolled', 'course_priority', '-created_at')
         elif user.is_authenticated and user.role == 'student':
             enrolled_course_ids = Course.objects.filter(
                 enrollments__student=user, 
@@ -152,9 +154,13 @@ class CourseViewSet(viewsets.ModelViewSet):
         
         student_id = request.data.get('student_id')
         if student_id:
-            if request.user.role not in ['admin', 'teacher']:
+            is_staff = request.user.role in ['admin', 'teacher']
+            if not is_staff and request.user.role == 'assistant':
+                is_staff = CourseAssistant.objects.filter(course=course, assistant=request.user).exists()
+                
+            if not is_staff:
                 return Response(
-                    {"error": "Нет прав для записи ученика на курс"},
+                    {"error": "Нет прав для записи ученика на этот курс"},
                     status=status.HTTP_403_FORBIDDEN
                 )
             student = get_object_or_404(User, pk=student_id)
@@ -268,9 +274,13 @@ class CourseViewSet(viewsets.ModelViewSet):
         
         Принимает список student_ids и записывает всех учеников на курс.
         """
-        if request.user.role not in ['admin', 'teacher']:
+        is_staff = request.user.role in ['admin', 'teacher']
+        if not is_staff and request.user.role == 'assistant':
+            is_staff = CourseAssistant.objects.filter(course=course, assistant=request.user).exists()
+            
+        if not is_staff:
             return Response(
-                {"error": "Нет прав для записи учеников на курс"},
+                {"error": "Нет прав для записи учеников на этот курс"},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -340,9 +350,13 @@ class CourseViewSet(viewsets.ModelViewSet):
         
         Принимает список student_ids и отчисляет всех учеников с курса.
         """
-        if request.user.role not in ['admin', 'teacher']:
+        is_staff = request.user.role in ['admin', 'teacher']
+        if not is_staff and request.user.role == 'assistant':
+            is_staff = CourseAssistant.objects.filter(course=course, assistant=request.user).exists()
+            
+        if not is_staff:
             return Response(
-                {"error": "Нет прав для отчисления учеников с курса"},
+                {"error": "Нет прав для отчисления учеников с этого курса"},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -386,7 +400,12 @@ class CourseViewSet(viewsets.ModelViewSet):
         
         Возвращает статистику по записям ученика на курсы.
         """
-        if request.user.role not in ['admin', 'teacher']:
+        is_staff = request.user.role in ['admin', 'teacher']
+        if not is_staff and request.user.role == 'assistant':
+            # Для статистики по конкретному ученику, проверяем, помогает ли ассистент хотя бы в одном курсе
+            is_staff = CourseAssistant.objects.filter(assistant=request.user).exists()
+            
+        if not is_staff:
             return Response(
                 {"error": "Нет прав для просмотра статистики учеников"},
                 status=status.HTTP_403_FORBIDDEN
@@ -407,11 +426,14 @@ class CourseViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        if request.user.role == 'teacher':
+        if request.user.role in ['teacher', 'assistant']:
             teacher_courses = CourseTeacher.objects.filter(teacher=request.user).values_list('course_id', flat=True)
+            assistant_courses = CourseAssistant.objects.filter(assistant=request.user).values_list('course_id', flat=True)
+            managed_courses = set(list(teacher_courses) + list(assistant_courses))
+            
             enrollments = CourseEnrollment.objects.filter(
                 student=student,
-                course_id__in=teacher_courses
+                course_id__in=managed_courses
             )
         else:
             enrollments = CourseEnrollment.objects.filter(student=student)

@@ -28,7 +28,7 @@ class LessonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, LessonPermission]
     pagination_class = LessonPagination
     filter_backends = [filters.SearchFilter]
-    search_fields = ['title',]
+    search_fields = ['title', 'table_of_contents', 'dictionary_entries__term', 'dictionary_entries__reading']
     ordering = ['order', 'id']
 
     def get_serializer_class(self):
@@ -149,6 +149,9 @@ class LessonViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
     def reorder_lessons(self, request, course_pk=None):
         course = get_object_or_404(Course, pk=course_pk)
+        
+        if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, course):
+             self.permission_denied(self.request, message="У вас нет прав на изменение порядка уроков в этом курсе.")
 
         data = request.data
         if not isinstance(data, list):
@@ -308,13 +311,16 @@ class SectionViewSet(viewsets.ModelViewSet):
             else:
                 serializer = SectionCompletionSerializer(completion, context={'request': request})
                 return Response(
-                    {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
+                {"message": "Раздел уже был завершен ранее.", "details": serializer.data},
                     status=status.HTTP_200_OK
                 )
                 
     @action(detail=False, methods=['post'], url_path='reorder', permission_classes=[IsAuthenticated, IsCourseStaffOrAdmin])
     def reorder_sections(self, request, lesson_pk=None, course_pk=None):
         lesson = get_object_or_404(Lesson, pk=lesson_pk, course_id=course_pk)
+        
+        if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, lesson.course):
+             self.permission_denied(self.request, message="У вас нет прав на изменение порядка разделов в этом уроке.")
 
         data = request.data
         if not isinstance(data, list):
@@ -497,7 +503,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         
         item_type = serializer.validated_data['item_type']
 
-        material_data_for_creation_or_update = serializer.validated_data.get('validated_material_data') 
+        material_data_for_creation_or_update = serializer.validated_data.get('raw_material_data') 
         
         existing_type = serializer.initial_data.get('existing_content_type')
         existing_id = serializer.initial_data.get('existing_content_id')
@@ -510,15 +516,22 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                 if material_data_for_creation_or_update:
                     if item_type == 'test':
                         test_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
-
                         test_serializer_instance = test_serializer_class(data=material_data_for_creation_or_update, context=serializer.context)
                         if test_serializer_instance.is_valid(raise_exception=True):
                             content_object = test_serializer_instance.save() 
                         else:
                             raise serializers.ValidationError({"detail": "Ошибка валидации данных теста."})
                     else:
-                        model_class = CONTENT_TYPE_MAP[item_type]['model']
-                        content_object = model_class.objects.create(**material_data_for_creation_or_update)
+                        # Use serializer to handle creation (including files)
+                        material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
+                        material_serializer = material_serializer_class(
+                            data=material_data_for_creation_or_update, 
+                            context=serializer.context
+                        )
+                        if material_serializer.is_valid(raise_exception=True):
+                            content_object = material_serializer.save(created_by=self.request.user)
+                        else:
+                            raise serializers.ValidationError({"detail": f"Ошибка валидации данных {item_type}."})
                     
                     content_type_for_item = ContentType.objects.get_for_model(content_object.__class__)
 
@@ -559,7 +572,7 @@ class SectionItemViewSet(viewsets.ModelViewSet):
         if not IsCourseStaffOrAdmin().has_object_permission(self.request, self, section.lesson.course):
             self.permission_denied(self.request, message="У вас нет прав на изменение этого элемента.")
 
-        material_data_for_update = serializer.validated_data.get('validated_material_data')
+        material_data_for_update = serializer.validated_data.get('raw_material_data')
         item_type = serializer.validated_data.get('item_type', current_instance.item_type)
         
         existing_type = serializer.initial_data.get('existing_content_type')
@@ -587,7 +600,15 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                             new_test_serializer.is_valid(raise_exception=True)
                             content_object_to_update_or_replace = new_test_serializer.save()
                         else:
-                            content_object_to_update_or_replace = target_material_model_class.objects.create(**material_data_for_update)
+                            material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
+                            material_serializer = material_serializer_class(
+                                data=material_data_for_update, 
+                                context=serializer.context
+                            )
+                            if material_serializer.is_valid(raise_exception=True):
+                                content_object_to_update_or_replace = material_serializer.save(created_by=self.request.user)
+                            else:
+                                raise serializers.ValidationError({"detail": f"Ошибка валидации данных нового {item_type}."})
                         
                         new_content_type_for_item = ContentType.objects.get_for_model(target_material_model_class)
                         new_object_id_for_item = content_object_to_update_or_replace.pk
@@ -603,9 +624,15 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                             if test_serializer_instance.is_valid(raise_exception=True):
                                 content_object_to_update_or_replace = test_serializer_instance.save()
                         else:
-                            for key, value in material_data_for_update.items():
-                                setattr(content_object_to_update_or_replace, key, value)
-                            content_object_to_update_or_replace.save()
+                            material_ser_class = CONTENT_TYPE_MAP[item_type]['serializer']
+                            material_ser = material_ser_class(
+                                instance=content_object_to_update_or_replace,
+                                data=material_data_for_update,
+                                partial=True,
+                                context=serializer.context
+                            )
+                            if material_ser.is_valid(raise_exception=True):
+                                content_object_to_update_or_replace = material_ser.save()
                     
                     update_kwargs_for_section_item_save['content_type'] = new_content_type_for_item
                     update_kwargs_for_section_item_save['object_id'] = new_object_id_for_item

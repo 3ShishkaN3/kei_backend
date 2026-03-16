@@ -41,6 +41,9 @@ WEBPUSH_SETTINGS = {
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
 
+KANJI_PAD_GRPC_ADDR = config('KANJI_PAD_GRPC_ADDR', default='kanji-pad-grpc:50051')
+KANJI_PAD_GRPC_TIMEOUT_SECONDS = config('KANJI_PAD_GRPC_TIMEOUT_SECONDS', cast=float, default=3.0)
+
 CELERY_BEAT_SCHEDULE = {
     'cleanup-expired-confirmation-codes': {
         'task': 'auth_service.tasks.cleanup_expired_confirmation_codes',
@@ -202,9 +205,11 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST', default='localhost')
 EMAIL_PORT = config('EMAIL_PORT', cast=int, default=587)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool, default=False)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', cast=bool, default=False)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', cast=int, default=10)
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@example.com')
 
 LOGGING = {
@@ -282,7 +287,7 @@ if USE_S3 and not DEBUG:
             "BACKEND": "kei_backend.storage_backends.MediaStorage",
         },
         "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            "BACKEND": "kei_backend.storage_backends.StaticStorage",
         },
     }
 
@@ -293,12 +298,15 @@ if USE_S3 and not DEBUG:
     AWS_DEFAULT_ACL = 'private'
     AWS_QUERYSTRING_AUTH = True
     
-
-    
-    STATIC_URL = '/static/'
+    STATIC_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.cloud.ru/static/"
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.cloud.ru/media/"
     STATIC_ROOT = BASE_DIR / 'staticfiles'
 else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
     STATIC_URL = '/static/'
     STATIC_ROOT = BASE_DIR / 'staticfiles'
+    
+    STATICFILES_DIRS = [
+        BASE_DIR / 'static',
+    ]

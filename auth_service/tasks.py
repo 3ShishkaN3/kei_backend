@@ -14,7 +14,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={'max_retries': 5}
+)
 def send_confirmation_email_task(self, email, code, purpose):
     """
     Асинхронная задача для отправки email с кодом подтверждения.
@@ -30,16 +35,13 @@ def send_confirmation_email_task(self, email, code, purpose):
     Returns:
         None: Задача логирует результат выполнения
     """
-    try:
-        logger.info(f"Отправка email с параметрами: email={email}, code={code}, purpose={purpose}")
-        
-        if not all([email, code, purpose]):
-            raise ValueError("Один из параметров для отправки письма пустой.")
-        
-        send_confirmation_email(email, code, purpose)
-        logger.info(f"Email успешно отправлен: {email} для {purpose}")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке email {email} для {purpose}: {str(e)}")
+    logger.info(f"Начало задачи отправки email: email={email}, purpose={purpose}")
+    
+    if not all([email, code, purpose]):
+        raise ValueError("Один из параметров для отправки письма пустой.")
+    
+    send_confirmation_email(email, code, purpose)
+    # logger.info(f"Email успешно отправлен: {email} для {purpose}")  # Это уже логируется в utils.send_confirmation_email
 
 
 @shared_task(bind=True)

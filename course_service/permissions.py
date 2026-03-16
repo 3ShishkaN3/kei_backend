@@ -11,7 +11,16 @@ class IsAdminTeacherAssistantOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return request.user.is_authenticated and request.user.role in ['admin', 'teacher', 'assistant']
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        if request.user.role in ['admin', 'teacher']:
+            return True
+            
+        if request.user.role == 'assistant':
+            return request.method != 'POST'
+            
+        return False
 
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:

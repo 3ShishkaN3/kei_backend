@@ -173,7 +173,6 @@ class SectionItemSerializer(serializers.ModelSerializer):
         final_material_data_payload = {}
         if content_creation_data_from_json_field:
             final_material_data_payload.update(content_creation_data_from_json_field)
-        final_material_data_payload.update(files_for_material)
 
         existing_type = attrs.get('existing_content_type')
         existing_id = attrs.get('existing_content_id')
@@ -205,13 +204,28 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
         if has_new_content_data:
             material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
-            material_serializer_instance = material_serializer_class(data=final_material_data_payload, context=self.context)
+            
+            material_instance = None
+            if is_update and self.instance.item_type == item_type:
+                material_instance = self.instance.content_object
+            
+            if files_for_material:
+                final_material_data_payload.update(files_for_material)
+
+            material_serializer_instance = material_serializer_class(
+                instance=material_instance,
+                data=final_material_data_payload, 
+                partial=True,
+                context=self.context
+            )
             try:
                 material_serializer_instance.is_valid(raise_exception=True)
                 attrs['validated_material_data'] = material_serializer_instance.validated_data 
+                attrs['raw_material_data'] = final_material_data_payload
             except serializers.ValidationError as e:
                 raise serializers.ValidationError({'content_material_data': e.detail})
         
+
 
 
         attrs.pop('content_data', None)
@@ -221,11 +235,8 @@ class SectionItemSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        
-
-        validated_data.pop('validated_material_data', None) 
-        
-
+        validated_data.pop('validated_material_data', None)
+        validated_data.pop('raw_material_data', None)
         validated_data.pop('content_data', None)
         validated_data.pop('existing_content_type', None)
         validated_data.pop('existing_content_id', None)
@@ -238,6 +249,7 @@ class SectionItemSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         validated_data.pop('validated_material_data', None)
+        validated_data.pop('raw_material_data', None)
         validated_data.pop('content_data', None)
         validated_data.pop('existing_content_type', None)
         validated_data.pop('existing_content_id', None)
@@ -308,6 +320,11 @@ class SectionSerializer(serializers.ModelSerializer):
         return value
 
 
+class SectionTitleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+        fields = ['id', 'title', 'order']
+
 class LessonListSerializer(serializers.ModelSerializer):
     created_by_name = serializers.ReadOnlyField(source='created_by.username')
     section_count = serializers.SerializerMethodField()
@@ -315,13 +332,14 @@ class LessonListSerializer(serializers.ModelSerializer):
     completion_percentage = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
     order = serializers.IntegerField(read_only=True)
+    sections = SectionTitleSerializer(many=True, read_only=True)
 
     class Meta:
         model = Lesson
         fields = [
             'id', 'title', 'cover_image', 'course_id', 'order',
             'created_by_name', 'created_at', 'updated_at', 'section_count',
-            'completion_percentage', 'is_locked', 'table_of_contents'
+            'completion_percentage', 'is_locked', 'table_of_contents', 'sections'
         ]
 
     def get_section_count(self, obj):

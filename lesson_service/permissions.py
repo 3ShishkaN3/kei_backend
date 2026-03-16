@@ -32,6 +32,9 @@ class IsCourseStaffOrAdmin(permissions.BasePermission):
             print(f"IsCourseStaffOrAdmin: Could not determine course from object: {type(obj)}")
             return False
 
+        if course.created_by == request.user:
+            return True
+
         is_teacher = CourseTeacher.objects.filter(course=course, teacher=request.user).exists()
         is_assistant = CourseAssistant.objects.filter(course=course, assistant=request.user).exists()
 
@@ -69,6 +72,9 @@ class CanViewLessonOrSectionContent(permissions.BasePermission):
         if not course:
             print(f"CanViewLessonOrSectionContent: Could not determine course from object: {type(obj)}")
             return False
+            
+        if course.created_by == request.user:
+            return True
         
         if course.status in ['free', 'published']:
             return True

@@ -189,6 +189,7 @@ class Test(models.Model):
         ('pronunciation', 'Проверка произношения'),
         ('spelling', 'Проверка правописания'),
         ('ai-conversation', 'AI Разговор (Кайва с сенсеем)'),
+        ('kanji-tracing', 'Прописи (иероглифы)'),
     )
     title = models.CharField(max_length=255, verbose_name="Название теста")
     description = models.TextField(blank=True, verbose_name="Описание/Инструкция к тесту")
@@ -379,6 +380,27 @@ class AiConversationQuestion(models.Model):
         null=True, 
         verbose_name="Личность/Характер модели (Опишите от себя)"
     )
+    speaking_style = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Стиль речи (например, формальный, вежливый, сленг)"
+    )
+    difficulty_level = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name="Уровень сложности (например, N5, Beginner)"
+    )
+    assessment_criteria = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Критерии оценки (как ИИ должен оценивать ученика)"
+    )
+    key_vocabulary = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Ключевые слова/фразы (которые учитель хочет услышать)"
+    )
     goodbye_condition = models.TextField(
         blank=True, 
         null=True, 
@@ -545,7 +567,6 @@ class AiConversationSubmissionAnswer(models.Model):
     def __str__(self):
         return f"Оценка AI разговора для submission {self.submission_id}"
 
-# JSON schema for evaluation_details
 AI_CONVERSATION_EVALUATION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -624,3 +645,44 @@ AI_CONVERSATION_EVALUATION_SCHEMA = {
         "detailed_feedback"
     ]
 }
+
+class KanjiTracingItem(models.Model):
+    test = models.ForeignKey(
+        Test,
+        on_delete=models.CASCADE,
+        related_name='kanji_tracing_items',
+        limit_choices_to={'test_type': 'kanji-tracing'},
+        verbose_name="Тест (Прописи)"
+    )
+    kanji = models.CharField(max_length=10, blank=True, null=True, verbose_name="Кандзи/Кана (если из базы)")
+    custom_image = models.ImageField(
+        upload_to='kanji_tracing_custom/', 
+        blank=True, null=True, 
+        verbose_name="Своё фото кандзи"
+    )
+    notes = models.TextField(blank=True, null=True, verbose_name="Заметки/Чтение (длинное поле справа)")
+    order = models.PositiveIntegerField(default=0, verbose_name="Порядок прописи")
+
+    class Meta:
+        verbose_name = "Элемент прописи"
+        verbose_name_plural = "Элементы прописей"
+        ordering = ['test', 'order']
+
+    def __str__(self):
+        return f"Пропись {self.kanji or 'с фото'} для теста: {self.test.title}"
+
+class KanjiTracingSubmissionAnswer(models.Model):
+    submission = models.OneToOneField(
+        TestSubmission, 
+        on_delete=models.CASCADE, 
+        related_name='kanji_tracing_answer'
+    )
+    submitted_image_file = models.ImageField(
+        upload_to='test_kanji_tracing_answers/',
+        blank=True, null=True,
+        verbose_name="Изображение заполненной прописи"
+    )
+
+    class Meta:
+        verbose_name = "Ответ на прописи"
+        verbose_name_plural = "Ответы на прописи"

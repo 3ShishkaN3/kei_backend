@@ -10,6 +10,14 @@ class UserProfile(models.Model):
     telegram_link = models.URLField(blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    # Selected avatar frame (must be a purchased bonus of type avatar_frame)
+    active_avatar_frame = models.ForeignKey(
+        "bonus_service.Bonus",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users_with_active_frame",
+    )
 
     def clear_fields(self):
         self.phone_number = ""

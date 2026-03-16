@@ -1,6 +1,6 @@
 from django.db import transaction, IntegrityError
 from django.utils import timezone
-from rest_framework import viewsets, status, mixins, parsers
+from rest_framework import viewsets, status, mixins, parsers, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -12,7 +12,8 @@ from .models import (
     Test, MCQOption, FreeTextQuestion, WordOrderSentence, MatchingPair,
     PronunciationQuestion, SpellingQuestion, TestSubmission,
     MCQSubmissionAnswer, FreeTextSubmissionAnswer, WordOrderSubmissionAnswer,
-    DragDropSubmissionAnswer, PronunciationSubmissionAnswer, SpellingSubmissionAnswer
+    DragDropSubmissionAnswer, PronunciationSubmissionAnswer, SpellingSubmissionAnswer,
+    KanjiTracingSubmissionAnswer
 )
 from .serializers import (
     TextMaterialSerializer, ImageMaterialSerializer, AudioMaterialSerializer,
@@ -197,7 +198,7 @@ class TestViewSet(BaseMaterialViewSet):
              )
 
         submission_status = 'submitted'
-        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
+        if test_instance.test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation', 'kanji-tracing']:
             submission_status = 'grading_pending'
 
         submission_instance = None
@@ -279,11 +280,19 @@ class TestViewSet(BaseMaterialViewSet):
                         submission=submission_instance, 
                         submitted_image_file=image_file
                     )
+
+                elif test_type == 'kanji-tracing':
+                    image_file = request.FILES.get('submitted_image_file')
+                    if image_file:
+                        KanjiTracingSubmissionAnswer.objects.create(
+                            submission=submission_instance, 
+                            submitted_image_file=image_file
+                        )
                 
                 if test_type in ['mcq-single', 'mcq-multi', 'word-order', 'drag-and-drop']:
                     self._perform_auto_check(test_instance, answers_data_from_json, submission_instance)
                 
-                if test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation']:
+                if test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation', 'kanji-tracing']:
                     submission_instance.status = 'grading_pending'
                     submission_instance.save(update_fields=['status'])
 

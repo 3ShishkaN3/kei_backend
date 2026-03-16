@@ -113,14 +113,19 @@ class TestViewSet(BaseMaterialViewSet):
 
         elif test_type == 'word-order':
             submitted_order_words = answers_data_from_json.get('submitted_order_words', [])
-            correct_ordered_texts = test_instance.word_order_sentence_details.correct_ordered_texts
-
-            if submitted_order_words == correct_ordered_texts:
-                score = 1.0
-                is_passed = True
-            else:
+            
+            wos = getattr(test_instance, 'word_order_sentence_details', None)
+            if not wos:
                 score = 0.0
                 is_passed = False
+            else:
+                correct_ordered_texts = wos.correct_ordered_texts
+                if submitted_order_words == correct_ordered_texts:
+                    score = 1.0
+                    is_passed = True
+                else:
+                    score = 0.0
+                    is_passed = False
 
         elif test_type == 'drag-and-drop':
             submitted_slot_answers = answers_data_from_json.get('answers', [])
@@ -271,6 +276,8 @@ class TestViewSet(BaseMaterialViewSet):
                         submission=submission_instance, 
                         submitted_audio_file=audio_file
                     )
+                    from .tasks import grade_pronunciation_submission
+                    grade_pronunciation_submission.delay(submission_instance.id)
                 
                 elif test_type == 'spelling':
                     image_file = request.FILES.get('submitted_image_file')
@@ -292,7 +299,10 @@ class TestViewSet(BaseMaterialViewSet):
                 if test_type in ['mcq-single', 'mcq-multi', 'word-order', 'drag-and-drop']:
                     self._perform_auto_check(test_instance, answers_data_from_json, submission_instance)
                 
-                if test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation', 'kanji-tracing']:
+                if test_type in ['free-text', 'spelling', 'ai-conversation', 'kanji-tracing']:
+                    submission_instance.status = 'grading_pending'
+                    submission_instance.save(update_fields=['status'])
+                elif test_type == 'pronunciation':
                     submission_instance.status = 'grading_pending'
                     submission_instance.save(update_fields=['status'])
 

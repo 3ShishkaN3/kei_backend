@@ -332,6 +332,13 @@ class PronunciationQuestion(models.Model):
 
     text_to_pronounce = models.TextField(blank=True, null=True, verbose_name="Текст для произношения (если есть)")
     explanation = models.TextField(blank=True, null=True, verbose_name="Пояснение/Контекст к заданию")
+    reference_audio_file = models.FileField(
+        upload_to='test_pronunciation_references/',
+        blank=True, null=True,
+        validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a', 'webm'])],
+        verbose_name="Эталонное аудио (от преподавателя)"
+    )
+    transcript = models.TextField(blank=False, null=False, verbose_name="Транскрипция речи")
 
     class Meta:
         verbose_name = "Вопрос на произношение"
@@ -518,7 +525,7 @@ class PronunciationSubmissionAnswer(models.Model):
     submission = models.OneToOneField(TestSubmission, on_delete=models.CASCADE, related_name='pronunciation_answer')
     submitted_audio_file = models.FileField(
         upload_to='test_pronunciation_answers/',
-        validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a'])],
+        validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a', 'webm'])],
         verbose_name="Аудио ответ студента"
     )
 

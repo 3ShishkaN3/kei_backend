@@ -522,7 +522,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
                         else:
                             raise serializers.ValidationError({"detail": "Ошибка валидации данных теста."})
                     else:
-                        # Use serializer to handle creation (including files)
                         material_serializer_class = CONTENT_TYPE_MAP[item_type]['serializer']
                         material_serializer = material_serializer_class(
                             data=material_data_for_creation_or_update, 
@@ -562,7 +561,6 @@ class SectionItemViewSet(viewsets.ModelViewSet):
             else:
                 raise serializers.ValidationError({"detail": f"Ошибка базы данных при создании элемента: {e}"})
         except Exception as e:
-            # import traceback; traceback.print_exc();
             raise serializers.ValidationError({"detail": f"Не удалось создать элемент раздела: {e}"})
 
     def perform_update(self, serializer):

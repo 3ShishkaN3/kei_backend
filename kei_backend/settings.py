@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     'calendar_service',
     'achievement_service',
     'bonus_service',
+    'exam_service',
     'notification_service.apps.NotificationServiceConfig',
     'channels',
     'webpush',

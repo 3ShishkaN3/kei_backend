@@ -178,7 +178,6 @@ CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_DOMAIN = "keisenpai.com"
 SESSION_COOKIE_SECURE = True
 
-SESSION_COOKIE_SECURE = False
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'sessionid'
 

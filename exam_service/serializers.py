@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from .models import Exam, ExamSection, ExamSectionItem, ExamAttempt, ExamAnswer
 from material_service.models import Test
@@ -169,7 +170,7 @@ class ExamSectionWriteSerializer(serializers.ModelSerializer):
 
 
 class ExamSectionItemWriteSerializer(serializers.ModelSerializer):
-    test_data = TestSerializer(write_only=True, required=False, allow_null=True)
+    test_data = serializers.JSONField(write_only=True, required=False, allow_null=True)
     test = serializers.PrimaryKeyRelatedField(
         queryset=Test.objects.all(), required=False, allow_null=True
     )
@@ -179,15 +180,41 @@ class ExamSectionItemWriteSerializer(serializers.ModelSerializer):
         fields = ['id', 'test', 'order', 'test_data']
         extra_kwargs = {'order': {'required': False}}
 
+    def to_internal_value(self, data):
+        if hasattr(data, 'dict'):
+            mutable_data = data.dict()
+        else:
+            mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+        
+        test_data_raw = mutable_data.get('test_data')
+        if test_data_raw and isinstance(test_data_raw, str):
+            try:
+                mutable_data['test_data'] = json.loads(test_data_raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        return super().to_internal_value(mutable_data)
+
     def create(self, validated_data):
         test_data = validated_data.pop('test_data', None)
         test_id = validated_data.get('test')
+
+        if test_data and isinstance(test_data, str):
+            try:
+                test_data = json.loads(test_data)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError({"test_data": "Некорректный формат JSON в поле test_data."})
 
         if test_data and not test_id:
             test_serializer = TestSerializer(data=test_data, context=self.context)
             test_serializer.is_valid(raise_exception=True)
             test = test_serializer.save()
             validated_data['test'] = test
+        elif test_id:
+            validated_data['test'] = test_id
+        
+        if not validated_data.get('test'):
+             raise serializers.ValidationError({"test_data": "Необходимо либо указать существующий тест, либо предоставить данные для нового."})
         
         return super().create(validated_data)
 
@@ -195,15 +222,28 @@ class ExamSectionItemWriteSerializer(serializers.ModelSerializer):
         test_data = validated_data.pop('test_data', None)
         test_id = validated_data.get('test')
 
+        if test_data and isinstance(test_data, str):
+            try:
+                test_data = json.loads(test_data)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError({"test_data": "Некорректный формат JSON в поле test_data."})
+
         if test_data:
-            test_serializer = TestSerializer(
-                instance.test, data=test_data, partial=True, context=self.context
-            )
-            test_serializer.is_valid(raise_exception=True)
-            test_serializer.save()
+            if instance.test:
+                test_serializer = TestSerializer(
+                    instance.test, data=test_data, partial=True, context=self.context
+                )
+                test_serializer.is_valid(raise_exception=True)
+                test_serializer.save()
+            else:
+                test_serializer = TestSerializer(data=test_data, context=self.context)
+                test_serializer.is_valid(raise_exception=True)
+                test = test_serializer.save()
+                instance.test = test
         
         if test_id:
             instance.test = test_id
 
+        instance.save()
         return super().update(instance, validated_data)
 

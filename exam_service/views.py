@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, mixins
+from rest_framework.parsers import MultiPartParser, JSONParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -71,6 +72,7 @@ class ExamSectionItemViewSet(viewsets.ModelViewSet):
     """CRUD для элементов секции экзамена (тестов внутри секции)."""
     permission_classes = [IsAuthenticated]
     serializer_class = ExamSectionItemWriteSerializer
+    parser_classes = (MultiPartParser, JSONParser)
 
     def get_section(self):
         section = ExamSection.objects.select_related('exam').get(

@@ -198,13 +198,22 @@ class ExamViewSet(viewsets.ModelViewSet):
         except CourseProgress.DoesNotExist:
             is_eligible = False
 
-        existing = ExamAttempt.objects.filter(exam=exam, student=user).first()
+        existing = ExamAttempt.objects.filter(exam=exam, student=user).order_by('-started_at').first()
+
+        next_attempt_available_at = None
+        if existing and existing.status in ['completed', 'timed_out', 'terminated_by_proctoring'] and exam.retake_interval_minutes > 0:
+            from datetime import timedelta
+            next_available = existing.finished_at + timedelta(minutes=exam.retake_interval_minutes)
+            if timezone.now() < next_available:
+                is_eligible = False
+                next_attempt_available_at = next_available.isoformat()
 
         return Response({
             "is_eligible": is_eligible,
             "has_attempt": existing is not None,
             "attempt_status": existing.status if existing else None,
             "attempt_id": existing.id if existing else None,
+            "next_attempt_available_at": next_attempt_available_at,
         })
 
     @action(detail=True, methods=['post'])
@@ -232,7 +241,7 @@ class ExamViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        existing = ExamAttempt.objects.filter(exam=exam, student=user).first()
+        existing = ExamAttempt.objects.filter(exam=exam, student=user).order_by('-started_at').first()
         if existing:
             if existing.status == 'in_progress':
                 serializer = ExamAttemptSerializer(existing, context={'request': request})
@@ -242,10 +251,17 @@ class ExamViewSet(viewsets.ModelViewSet):
                     "exam": exam_data,
                     "resumed": True
                 })
-            return Response(
-                {"detail": "Вы уже прошли этот экзамен."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            
+            if exam.retake_interval_minutes > 0:
+                from datetime import timedelta
+                next_available = existing.finished_at + timedelta(minutes=exam.retake_interval_minutes)
+                if timezone.now() < next_available:
+                    return Response(
+                        {"detail": f"Вы сможете пройти экзамен снова позже."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            elif exam.retake_interval_minutes == 0:
+                pass
 
         attempt = ExamAttempt.objects.create(
             exam=exam,
@@ -314,7 +330,7 @@ class ExamViewSet(viewsets.ModelViewSet):
                 except ExamSectionItem.DoesNotExist:
                     continue
 
-                score, is_correct = self._auto_grade(item.test, answer_data)
+                # score, is_correct = self._auto_grade(item.test, answer_data)
 
                 submitted_file = request.FILES.get(f'file_{item_id}')
 
@@ -324,8 +340,8 @@ class ExamViewSet(viewsets.ModelViewSet):
                     defaults={
                         'answer_data': answer_data,
                         'submitted_file': submitted_file,
-                        'score': score,
-                        'is_correct': is_correct,
+                        'score': None,
+                        'is_correct': None,
                     }
                 )
 
@@ -382,9 +398,8 @@ class ExamViewSet(viewsets.ModelViewSet):
         else:
             target_user_id = user.id
 
-        try:
-            attempt = ExamAttempt.objects.get(exam=exam, student_id=target_user_id)
-        except ExamAttempt.DoesNotExist:
+        attempt = ExamAttempt.objects.filter(exam=exam, student_id=target_user_id).order_by('-started_at').first()
+        if not attempt:
             return Response(
                 {"detail": "Попытка экзамена не найдена."},
                 status=status.HTTP_404_NOT_FOUND
@@ -487,12 +502,28 @@ class ExamViewSet(viewsets.ModelViewSet):
 
     def _calculate_total_score(self, attempt):
         """Calculate combined score from all answers."""
-        answers = attempt.answers.all()
+        answers = attempt.answers.select_related('exam_section_item__test').all()
         total = 0.0
-        max_score = answers.count()
+        max_score = 0.0
         for ans in answers:
+            item_max = float(ans.exam_section_item.custom_max_score) if ans.exam_section_item.custom_max_score is not None else 1.0
+            max_score += item_max
+
+            if ans.score is None:
+                fraction, is_correct = self._auto_grade(ans.exam_section_item.test, ans.answer_data)
+                
+                if fraction is not None:
+                    final_score = float(fraction) * item_max
+                else:
+                    final_score = None
+
+                ans.score = final_score
+                ans.is_correct = is_correct
+                ans.save(update_fields=['score', 'is_correct'])
+
             if ans.score is not None:
                 total += float(ans.score)
+                
         attempt.total_score = round(total, 2)
-        attempt.max_possible_score = max_score
+        attempt.max_possible_score = round(max_score)
         attempt.save(update_fields=['total_score', 'max_possible_score'])

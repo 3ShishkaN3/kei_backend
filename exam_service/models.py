@@ -19,6 +19,16 @@ class Exam(models.Model):
         verbose_name="Длительность (минуты)",
         help_text="Сколько минут даётся на прохождение экзамена"
     )
+    passing_score = models.DecimalField(
+        max_digits=7, decimal_places=2,
+        default=0.0,
+        verbose_name="Проходной балл"
+    )
+    retake_interval_minutes = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Интервал между попытками (минуты)",
+        help_text="0 — без ограничений по времени."
+    )
     is_published = models.BooleanField(default=False, verbose_name="Опубликован")
     require_camera = models.BooleanField(default=True, verbose_name="Требуется камера (прокторинг)")
     created_by = models.ForeignKey(
@@ -74,6 +84,12 @@ class ExamSectionItem(models.Model):
         on_delete=models.CASCADE,
         related_name='exam_items',
         verbose_name="Тест"
+    )
+    custom_max_score = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="Кастомный максимальный балл",
+        help_text="Если пусто, используется дефолтный балл (обычно 1.0)"
     )
     order = models.PositiveIntegerField(default=0, verbose_name="Порядок")
 
@@ -137,7 +153,6 @@ class ExamAttempt(models.Model):
     class Meta:
         verbose_name = "Попытка экзамена"
         verbose_name_plural = "Попытки экзаменов"
-        unique_together = ('exam', 'student')
 
     def __str__(self):
         return f"{self.student.username} — {self.exam.title} ({self.get_status_display()})"

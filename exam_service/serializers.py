@@ -11,7 +11,7 @@ class ExamSectionItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ExamSectionItem
-        fields = ['id', 'test', 'order', 'test_detail']
+        fields = ['id', 'test', 'order', 'custom_max_score', 'test_detail']
 
 
 class ExamSectionSerializer(serializers.ModelSerializer):
@@ -30,6 +30,7 @@ class ExamListSerializer(serializers.ModelSerializer):
         model = Exam
         fields = [
             'id', 'title', 'description', 'duration_minutes',
+            'passing_score', 'retake_interval_minutes',
             'is_published', 'require_camera', 'sections_count',
             'has_attempt', 'created_at'
         ]
@@ -47,19 +48,25 @@ class ExamListSerializer(serializers.ModelSerializer):
 class ExamDetailSerializer(serializers.ModelSerializer):
     sections = ExamSectionSerializer(many=True, read_only=True)
     course_title = serializers.CharField(source='course.title', read_only=True)
+    sections_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
         fields = [
             'id', 'title', 'description', 'duration_minutes',
+            'passing_score', 'retake_interval_minutes',
             'is_published', 'require_camera', 'course', 'course_title',
-            'sections', 'created_at'
+            'sections', 'sections_count', 'created_at'
         ]
+
+    def get_sections_count(self, obj):
+        return obj.sections.count()
 
 
 class ExamSectionItemCreateSerializer(serializers.Serializer):
     test_id = serializers.IntegerField()
     order = serializers.IntegerField()
+    custom_max_score = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
 
 class ExamSectionCreateSerializer(serializers.Serializer):
@@ -75,6 +82,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         model = Exam
         fields = [
             'id', 'title', 'description', 'duration_minutes',
+            'passing_score', 'retake_interval_minutes',
             'is_published', 'require_camera', 'course', 'sections'
         ]
 
@@ -89,7 +97,8 @@ class ExamCreateSerializer(serializers.ModelSerializer):
                 ExamSectionItem.objects.create(
                     section=section,
                     test_id=item_data['test_id'],
-                    order=item_data['order']
+                    order=item_data['order'],
+                    custom_max_score=item_data.get('custom_max_score')
                 )
         return exam
 
@@ -99,6 +108,8 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         instance.title = validated_data.get('title', instance.title)
         instance.description = validated_data.get('description', instance.description)
         instance.duration_minutes = validated_data.get('duration_minutes', instance.duration_minutes)
+        instance.passing_score = validated_data.get('passing_score', instance.passing_score)
+        instance.retake_interval_minutes = validated_data.get('retake_interval_minutes', instance.retake_interval_minutes)
         instance.is_published = validated_data.get('is_published', instance.is_published)
         instance.require_camera = validated_data.get('require_camera', instance.require_camera)
         instance.save()
@@ -112,7 +123,8 @@ class ExamCreateSerializer(serializers.ModelSerializer):
                     ExamSectionItem.objects.create(
                         section=section,
                         test_id=item_data['test_id'],
-                        order=item_data['order']
+                        order=item_data['order'],
+                        custom_max_score=item_data.get('custom_max_score')
                     )
         return instance
 
@@ -177,7 +189,7 @@ class ExamSectionItemWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ExamSectionItem
-        fields = ['id', 'test', 'order', 'test_data']
+        fields = ['id', 'test', 'order', 'custom_max_score', 'test_data']
         extra_kwargs = {'order': {'required': False}}
 
     def to_internal_value(self, data):

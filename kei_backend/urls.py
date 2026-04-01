@@ -44,6 +44,8 @@ api_urlpatterns = [
     path("achievements/", include("achievement_service.urls")),
     path("bonuses/", include("bonus_service.urls")),
     path("notifications/", include("notification_service.urls")),
+    path("exams/", include("exam_service.urls")),
+    path("challenges/", include("challenge_service.urls")),
     path("webpush/", include("webpush.urls")),
 ]
 

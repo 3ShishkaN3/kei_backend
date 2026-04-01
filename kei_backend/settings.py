@@ -40,6 +40,7 @@ WEBPUSH_SETTINGS = {
 
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
+CHALLENGE_AI_MODEL = config('CHALLENGE_AI_MODEL', default='gemini-3.1-flash-lite-preview')
 
 KANJI_PAD_GRPC_ADDR = config('KANJI_PAD_GRPC_ADDR', default='kanji-pad-grpc:50051')
 KANJI_PAD_GRPC_TIMEOUT_SECONDS = config('KANJI_PAD_GRPC_TIMEOUT_SECONDS', cast=float, default=3.0)
@@ -79,6 +80,8 @@ INSTALLED_APPS = [
     'calendar_service',
     'achievement_service',
     'bonus_service',
+    'exam_service',
+    'challenge_service',
     'notification_service.apps.NotificationServiceConfig',
     'channels',
     'webpush',
@@ -177,7 +180,6 @@ CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_DOMAIN = "keisenpai.com"
 SESSION_COOKIE_SECURE = True
 
-SESSION_COOKIE_SECURE = False
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'sessionid'
 

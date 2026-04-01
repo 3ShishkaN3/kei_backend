@@ -189,18 +189,50 @@ class TestViewSet(BaseMaterialViewSet):
         validated_input_data = input_serializer.validated_data
         answers_data_from_json = validated_input_data.get('answers') 
         section_item_id = validated_input_data.get('section_item_id')
+        challenge_id = validated_input_data.get('challenge_id')
 
-        try:
-            section_item = SectionItem.objects.select_related('section__lesson__course').get(
-                pk=section_item_id,
-                content_type__model=Test._meta.model_name,
-                object_id=test_instance.pk
-            )
-        except SectionItem.DoesNotExist:
-             return Response(
-                 {"detail": "Связь теста с элементом урока не найдена или некорректна."}, 
-                 status=status.HTTP_400_BAD_REQUEST
-             )
+        section_item = None
+        is_challenge_mode = bool(challenge_id)
+
+        if is_challenge_mode:
+            from challenge_service.models import ChallengeTest
+            if not ChallengeTest.objects.filter(
+                challenge_id=challenge_id,
+                challenge__user=student,
+                test=test_instance,
+            ).exists():
+                return Response(
+                    {"detail": "Этот тест не принадлежит указанному испытанию."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            already_submitted = TestSubmission.objects.filter(
+                test=test_instance,
+                student=student,
+            ).filter(
+                section_item__isnull=True
+            ).exists()
+            if already_submitted:
+                return Response(
+                    {"detail": "Этот тест в испытании уже был отправлен. Повторная попытка недоступна."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            if not section_item_id:
+                return Response(
+                    {"detail": "Необходимо указать section_item_id или challenge_id."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                section_item = SectionItem.objects.select_related('section__lesson__course').get(
+                    pk=section_item_id,
+                    content_type__model=Test._meta.model_name,
+                    object_id=test_instance.pk
+                )
+            except SectionItem.DoesNotExist:
+                return Response(
+                    {"detail": "Связь теста с элементом урока не найдена или некорректна."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         submission_status = 'submitted'
         if test_instance.test_type in ['free-text', 'pronunciation', 'spelling', 'ai-conversation', 'kanji-tracing']:
@@ -233,6 +265,8 @@ class TestViewSet(BaseMaterialViewSet):
                         submission=submission_instance,
                         answer_text=answers_data_from_json.get('answer_text', '')
                     )
+                    from progress_service.tasks import grade_free_text_submission
+                    grade_free_text_submission.delay(submission_instance.id)
                 elif test_type == 'word-order':
                     WordOrderSubmissionAnswer.objects.create(
                         submission=submission_instance,
@@ -314,28 +348,29 @@ class TestViewSet(BaseMaterialViewSet):
             return Response({"detail": f"Произошла внутренняя ошибка при сохранении ответа: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if submission_instance:
-            lesson = section_item.section.lesson
-            course = lesson.course
-            kafka_data = {
-                'type': 'test_submitted', 
-                'user_id': student.id, 
-                'submission_id': submission_instance.id,
-                'test_id': test_instance.id, 
-                'test_title': test_instance.title,
-                'test_type': test_instance.test_type,
-                'section_item_id': section_item.id,
-                'section_id': section_item.section.id,
-                'section_title': section_item.section.title,
-                'lesson_id': lesson.id,
-                'lesson_title': lesson.title,
-                'course_id': course.id,
-                'course_title': course.title,
-                'timestamp': submission_instance.submitted_at.isoformat(), 
-                'status': submission_instance.status,
-            }
-            success = send_to_kafka('progress_events', kafka_data)
-            if not success:
-                print(f"Error sending Kafka event for submission {submission_instance.id}")
+            if section_item:
+                lesson = section_item.section.lesson
+                course = lesson.course
+                kafka_data = {
+                    'type': 'test_submitted', 
+                    'user_id': student.id, 
+                    'submission_id': submission_instance.id,
+                    'test_id': test_instance.id, 
+                    'test_title': test_instance.title,
+                    'test_type': test_instance.test_type,
+                    'section_item_id': section_item.id,
+                    'section_id': section_item.section.id,
+                    'section_title': section_item.section.title,
+                    'lesson_id': lesson.id,
+                    'lesson_title': lesson.title,
+                    'course_id': course.id,
+                    'course_title': course.title,
+                    'timestamp': submission_instance.submitted_at.isoformat(), 
+                    'status': submission_instance.status,
+                }
+                success = send_to_kafka('progress_events', kafka_data)
+                if not success:
+                    print(f"Error sending Kafka event for submission {submission_instance.id}")
 
         response_serializer_context = self.get_serializer_context()
         response_serializer_context['test'] = test_instance

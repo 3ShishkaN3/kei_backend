@@ -481,7 +481,7 @@ class Command(BaseCommand):
         if total_tests > 0:
             tests_completion = (passed_tests_count / total_tests) * 100
         else:
-            tests_completion = 0
+            tests_completion = 100
         course_progress.completion_percentage = (lessons_completion + tests_completion) / 2
         if course_progress.completion_percentage >= 100 and not course_progress.completed_at:
             course_progress.completed_at = timezone.now()

@@ -969,7 +969,8 @@ class TestSubmissionListSerializer(serializers.ModelSerializer):
 
 
 class TestSubmissionInputSerializer(serializers.Serializer):
-    section_item_id = serializers.IntegerField(required=True, write_only=True)
+    section_item_id = serializers.IntegerField(required=False, write_only=True, allow_null=True)
+    challenge_id = serializers.IntegerField(required=False, write_only=True, allow_null=True)
     answers = serializers.JSONField(required=True)
     submitted_audio_file = serializers.FileField(required=False, allow_empty_file=True, write_only=True, allow_null=True)
     submitted_image_file = serializers.ImageField(required=False, allow_empty_file=True, write_only=True, allow_null=True)
@@ -1026,8 +1027,6 @@ class TestSubmissionInputSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"Неизвестный тип теста для валидации ответов: {test_type}")
 
         if validation_errors:
-            # Instead of wrapping in {"answers": ...}, we just raise.
-            # DRF will automatically associate it with the 'answers' field.
             raise serializers.ValidationError(validation_errors)
 
         return answers_data_from_json_field 

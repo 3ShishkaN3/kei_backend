@@ -56,18 +56,19 @@ def grade_free_text_submission(submission_id):
             submission.status = 'auto_passed' if is_correct else 'auto_failed'
             submission.save()
 
-            kafka_data = {
-                'type': 'test_graded',
-                'user_id': submission.student.id,
-                'test_id': test.id,
-                'status': submission.status,
-                'score': score,
-                'section_id': submission.section_item.section.id,
-                'lesson_id': submission.section_item.section.lesson.id,
-                'course_id': submission.section_item.section.lesson.course.id,
-                'timestamp': timezone.now().isoformat(),
-            }
-            send_to_kafka('progress_events', kafka_data)
+            if submission.section_item_id:
+                kafka_data = {
+                    'type': 'test_graded',
+                    'user_id': submission.student.id,
+                    'test_id': test.id,
+                    'status': submission.status,
+                    'score': score,
+                    'section_id': submission.section_item.section.id,
+                    'lesson_id': submission.section_item.section.lesson.id,
+                    'course_id': submission.section_item.section.lesson.course.id,
+                    'timestamp': timezone.now().isoformat(),
+                }
+                send_to_kafka('progress_events', kafka_data)
 
             logger.info(f"Submission {submission_id} успешно оценен LLM и отправлено событие 'test_graded'.")
 

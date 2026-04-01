@@ -40,6 +40,7 @@ WEBPUSH_SETTINGS = {
 
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 LLM_GRADING_MODEL = config('LLM_GRADING_MODEL', default='gemini-2.5-flash-lite')
+CHALLENGE_AI_MODEL = config('CHALLENGE_AI_MODEL', default='gemini-3.1-flash-lite-preview')
 
 KANJI_PAD_GRPC_ADDR = config('KANJI_PAD_GRPC_ADDR', default='kanji-pad-grpc:50051')
 KANJI_PAD_GRPC_TIMEOUT_SECONDS = config('KANJI_PAD_GRPC_TIMEOUT_SECONDS', cast=float, default=3.0)
@@ -80,6 +81,7 @@ INSTALLED_APPS = [
     'achievement_service',
     'bonus_service',
     'exam_service',
+    'challenge_service',
     'notification_service.apps.NotificationServiceConfig',
     'channels',
     'webpush',

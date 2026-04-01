@@ -53,8 +53,21 @@ class CanSubmitTest(permissions.BasePermission):
             return False
 
         section_item_id = request.data.get('section_item_id')
+        challenge_id = request.data.get('challenge_id')
+
+        if challenge_id:
+            from challenge_service.models import ChallengeTest
+            is_test_in_user_challenge = ChallengeTest.objects.filter(
+                challenge_id=challenge_id,
+                challenge__user=request.user,
+                test=obj,
+            ).exists()
+            if not is_test_in_user_challenge:
+                self.message = "Тест не найден в указанном испытании пользователя."
+            return is_test_in_user_challenge
+
         if not section_item_id:
-            self.message = "Не предоставлен ID элемента раздела (section_item_id)."
+            self.message = "Не предоставлен ID элемента раздела (section_item_id) или challenge_id."
             return False
 
         try:

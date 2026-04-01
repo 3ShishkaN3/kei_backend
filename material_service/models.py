@@ -8,6 +8,7 @@ class TextMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     content = models.TextField(verbose_name="Содержимое (текст или Markdown)")
     is_markdown = models.BooleanField(default=False, verbose_name="Использовать Markdown")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name='created_text_materials',
@@ -26,6 +27,7 @@ class TextMaterial(models.Model):
 class ImageMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
     alt_text = models.CharField(max_length=255, blank=True, verbose_name="Alt текст (для доступности)")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
     image = models.ImageField(
         upload_to='material_images/',
         verbose_name="Файл изображения"
@@ -91,6 +93,7 @@ class ImageMaterial(models.Model):
 
 class AudioMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
     audio_file = models.FileField(
         upload_to='material_audio/',
         validators=[FileExtensionValidator(allowed_extensions=['mp3', 'wav', 'ogg', 'm4a'])], 
@@ -122,6 +125,7 @@ class VideoMaterial(models.Model):
         ('file', 'Загруженный файл'),
     )
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
     source_type = models.CharField(max_length=10, choices=VIDEO_SOURCE_CHOICES, default='url', verbose_name="Источник видео")
     video_url = models.URLField(blank=True, null=True, verbose_name="URL видео (если источник URL)")
     video_file = models.FileField(
@@ -158,6 +162,7 @@ class VideoMaterial(models.Model):
 
 class DocumentMaterial(models.Model):
     title = models.CharField(max_length=255, blank=True, verbose_name="Заголовок (необязательно)")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
     document_file = models.FileField(
         upload_to='material_docs/',
         validators=[FileExtensionValidator(allowed_extensions=['pdf', 'ppt', 'pptx', 'doc', 'docx'])],
@@ -194,6 +199,7 @@ class Test(models.Model):
     title = models.CharField(max_length=255, verbose_name="Название теста")
     description = models.TextField(blank=True, verbose_name="Описание/Инструкция к тесту")
     test_type = models.CharField(max_length=20, choices=TEST_TYPE_CHOICES, verbose_name="Тип теста")
+    source = models.TextField(blank=True, default='', verbose_name="Источник (необязательно)")
 
     attached_image = models.ForeignKey(
         ImageMaterial, null=True, blank=True, on_delete=models.SET_NULL,
